@@ -178,6 +178,8 @@ function search(engine) {
 
 // ---------- 結果画面 ----------
 let shownQuery = null;
+let shownRoutes = [];
+let resultLoading = false;
 let searchSeq = 0;
 
 function resultUrl(q) {
@@ -219,6 +221,8 @@ async function showResults(q, push) {
   list.textContent = '';
   list.append(el('p', 'loading', '検索中…'));
   const seq = ++searchSeq;
+  shownRoutes = [];
+  resultLoading = true;
 
   let data;
   try {
@@ -228,6 +232,7 @@ async function showResults(q, push) {
     data = { error: '通信できませんでした。電波の良いところで再度お試しください', routes: [] };
   }
   if (seq !== searchSeq) return; // 新しい検索が始まっていたら捨てる
+  resultLoading = false;
 
   list.textContent = '';
   if (!data.routes || !data.routes.length) {
@@ -240,6 +245,7 @@ async function showResults(q, push) {
     list.append(box);
     return;
   }
+  shownRoutes = data.routes;
   data.routes.forEach((r, i) => list.append(renderRoute(r, i)));
 }
 
@@ -313,31 +319,9 @@ function renderSteps(steps) {
 // 前後の時間で再検索
 function shiftSearch(direction) {
   const q = shownQuery;
-  if (!q) return;
-  const routes = [...document.querySelectorAll('#resultList .route .big')].map((e) => e.textContent.split(' → '));
-  const base = whenToDate(q.when);
-  const toDateNear = (hhmm) => {
-    const [h, m] = hhmm.split(':').map(Number);
-    const d = new Date(base);
-    d.setHours(h, m, 0, 0);
-    // 日付をまたいだ場合の補正
-    if (d - base > 12 * 3600e3) d.setDate(d.getDate() - 1);
-    if (base - d > 12 * 3600e3) d.setDate(d.getDate() + 1);
-    return d;
-  };
-  let next;
-  if (direction > 0) {
-    const deps = routes.map((r) => r[0]).filter((t) => /\d:\d/.test(t)).map(toDateNear);
-    const d = deps.length ? new Date(Math.min(...deps)) : base;
-    next = { ...q, type: 'dep', when: dateToWhen(new Date(d.getTime() + 60e3)) };
-  } else {
-    const arrs = routes.map((r) => r[1]).filter((t) => /\d:\d/.test(t || '')).map(toDateNear);
-    if (arrs.length) {
-      next = { ...q, type: 'arr', when: dateToWhen(new Date(Math.min(...arrs) - 60e3)) };
-    } else {
-      next = { ...q, type: 'dep', when: dateToWhen(new Date(base.getTime() - 30 * 60e3)) };
-    }
-  }
+  if (!q || resultLoading) return;
+  const { type, date } = TimeShift.shift(direction, q.type, whenToDate(q.when), shownRoutes.map((r) => r.summary));
+  const next = { ...q, type, when: dateToWhen(date) };
   fillForm(next);
   showResults(next, true);
 }
@@ -438,51 +422,74 @@ function renderLists() {
 }
 
 // ---------- 現在地 ----------
-function nearestStation(lat, lng) {
-  // HeartRails Express API（JSONP）で最寄り駅を取得
-  return new Promise((resolve, reject) => {
-    const cb = '__norikae_cb_' + Date.now();
-    const script = document.createElement('script');
-    const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 8000);
-    function cleanup() {
-      clearTimeout(timer);
-      delete window[cb];
-      script.remove();
-    }
-    window[cb] = (data) => {
-      cleanup();
-      const list = data && data.response && data.response.station;
-      if (list && list.length) resolve(list[0]);
-      else reject(new Error('no station'));
-    };
-    script.onerror = () => { cleanup(); reject(new Error('load error')); };
-    script.src = 'https://express.heartrails.com/api/json?' + query({ method: 'getStations', x: lng, y: lat, jsonp: cb });
-    document.head.append(script);
+async function nearestStations(lat, lng) {
+  const res = await fetch('api/nearest?' + query({ lat, lng }));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.stations || !data.stations.length) throw new Error(data.error || 'no station');
+  return data.stations;
+}
+
+function getPosition(options) {
+  return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, options));
+}
+
+function renderNearby(stations) {
+  const row = $('nearbyRow');
+  row.textContent = '';
+  row.hidden = stations.length < 2;
+  if (row.hidden) return;
+  row.append(el('span', 'nearby-label', '近くの駅'));
+  stations.forEach((st) => {
+    const b = el('button', 'chip', st.name);
+    b.type = 'button';
+    b.title = `${st.lines.join('・')} ${st.distance}`;
+    b.addEventListener('click', () => {
+      fromEl.value = st.name;
+      fromCoords = null;
+      row.hidden = true;
+    });
+    row.append(b);
   });
 }
 
-function useCurrentLocation() {
-  if (!navigator.geolocation) { toast('位置情報が使えません'); return; }
+async function useCurrentLocation() {
+  if (!window.isSecureContext || !navigator.geolocation) {
+    toast('このブラウザでは位置情報が使えません');
+    return;
+  }
   const btn = $('locBtn');
   btn.disabled = true;
   toast('現在地を取得中…');
-  navigator.geolocation.getCurrentPosition(async (pos) => {
-    const { latitude: lat, longitude: lng } = pos.coords;
-    try {
-      const st = await nearestStation(lat, lng);
-      fromEl.value = st.name;
-      fromCoords = null;
-      toast(`最寄り駅：${st.name}（${st.line}・${st.distance}）`);
-    } catch (e) {
-      fromEl.value = CURRENT_LOCATION;
-      fromCoords = { lat: lat.toFixed(6), lng: lng.toFixed(6) };
-      toast('最寄り駅は取得できませんでした（地図アプリでは現在地から検索します）');
+  let pos;
+  try {
+    // まずは速い測位（Wi-Fi など）、だめなら GPS で再試行
+    pos = await getPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 })
+      .catch((e) => (e.code === 1 ? Promise.reject(e) : getPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })));
+  } catch (e) {
+    btn.disabled = false;
+    if (e.code === 1) {
+      toast('位置情報が許可されていません');
+      $('locHelpDlg').showModal();
+    } else {
+      toast('現在地を特定できませんでした。少し移動してもう一度お試しください');
     }
-    btn.disabled = false;
-  }, () => {
-    btn.disabled = false;
-    toast('位置情報を取得できませんでした');
-  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+    return;
+  }
+
+  const { latitude: lat, longitude: lng } = pos.coords;
+  try {
+    const stations = await nearestStations(lat, lng);
+    fromEl.value = stations[0].name;
+    fromCoords = null;
+    renderNearby(stations);
+    toast(`最寄り駅：${stations[0].name}（${stations[0].distance}）`);
+  } catch (e) {
+    fromEl.value = CURRENT_LOCATION;
+    fromCoords = { lat: lat.toFixed(6), lng: lng.toFixed(6) };
+    $('nearbyRow').hidden = true;
+    toast('最寄り駅は取得できませんでした（地図アプリでは現在地から検索できます）');
+  }
+  btn.disabled = false;
 }
 
 // ---------- 設定 ----------
@@ -578,7 +585,7 @@ function init() {
   fromEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); toEl.focus(); }
   });
-  fromEl.addEventListener('input', () => { fromCoords = null; });
+  fromEl.addEventListener('input', () => { fromCoords = null; $('nearbyRow').hidden = true; });
   $('swapBtn').addEventListener('click', () => {
     const a = fromEl.value;
     fromEl.value = toEl.value;

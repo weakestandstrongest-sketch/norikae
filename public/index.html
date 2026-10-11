@@ -43,6 +43,7 @@
         </div>
         <button type="button" id="swapBtn" class="swap" aria-label="出発と到着を入れ替え">⇅</button>
       </div>
+      <div class="nearby" id="nearbyRow" hidden></div>
       <datalist id="stationList"></datalist>
 
       <div class="seg" role="radiogroup" aria-label="日時の種類">
@@ -164,8 +165,23 @@
     </form>
   </dialog>
 
+  <dialog id="locHelpDlg">
+    <form method="dialog" class="settings help">
+      <h2>位置情報を許可するには</h2>
+      <ol>
+        <li>iPhone の「設定」→「プライバシーとセキュリティ」→「位置情報サービス」を<b>オン</b>にする</li>
+        <li>同じ画面を下にスクロールして「<b>Safari の Web サイト</b>」→「<b>次回確認</b>」か「<b>このAppの使用中</b>」を選び、「正確な位置情報」もオンにする</li>
+        <li>Safari でこのページを開き、アドレスバーの「<b>ぁあ</b>」（または「…」）→「<b>Web サイトの設定</b>」→「位置情報」を「<b>確認</b>」か「<b>許可</b>」にする</li>
+        <li>ページを再読み込みして、もう一度 📍 を押す</li>
+      </ol>
+      <p class="hint">ホーム画面のアイコンから開いている場合は、上の 1・2 を確認してからアプリを開き直してください。それでもだめなときは、アイコンを削除して Safari から「ホーム画面に追加」し直すと許可の確認が出ます。</p>
+      <menu><button value="close" class="primary">閉じる</button></menu>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="timeshift.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

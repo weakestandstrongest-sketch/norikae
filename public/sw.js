@@ -1,10 +1,11 @@
 // オフラインでも画面を開けるよう、アプリ本体だけをキャッシュする
-const CACHE = 'norikae-v2';
+const CACHE = 'norikae-v3';
 const ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './timeshift.js',
   './manifest.webmanifest',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',

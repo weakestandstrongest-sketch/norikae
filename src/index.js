@@ -1,4 +1,5 @@
 import { buildSearchUrl, parseResult, InputError, YAHOO_ORIGIN } from './yahoo.js';
+import { parseCoords, findNearest } from './nearest.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 
@@ -48,10 +49,23 @@ async function handleSearch(request, env, ctx) {
   return out;
 }
 
+async function handleNearest(request) {
+  const coords = parseCoords(new URL(request.url).searchParams);
+  if (!coords) return json({ error: '位置情報の値が正しくありません' }, 400);
+  try {
+    const stations = await findNearest(coords);
+    if (!stations.length) return json({ stations, error: '近くに駅が見つかりませんでした' });
+    return json({ stations });
+  } catch (e) {
+    return json({ error: '最寄り駅を取得できませんでした' }, 502);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/api/search') return handleSearch(request, env, ctx);
+    if (url.pathname === '/api/nearest') return handleNearest(request);
     if (url.pathname === '/api/health') return json({ ok: true });
     // それ以外は public/ の静的ファイル
     return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
