@@ -364,3 +364,61 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   color: var(--accent);
   cursor: pointer;
 }
+
+/* 前後のダイヤ（下から出るシート） */
+.sheet-dlg {
+  width: 100%;
+  max-width: 560px;
+  height: 90vh;
+  max-height: 90vh;
+  margin: auto auto 0;
+  border-radius: 16px 16px 0 0;
+}
+.sheet-dlg[open] { display: flex; flex-direction: column; }
+.dia-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 12px 16px 4px; }
+.dia-head h2 { margin: 0; font-size: 17px; }
+.dia-head .chip { justify-self: start; padding: 8px 14px; font-size: 15px; }
+.dia-route { margin: 4px 16px 0; font-weight: 700; font-size: 16px; }
+.dia-note { margin: 4px 16px 8px; color: var(--sub); font-size: 12px; line-height: 1.5; }
+.dia-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.dia-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 16px;
+  cursor: pointer;
+}
+.dia-row.current { background: rgba(22, 163, 74, .16); }
+.dia-row:disabled { opacity: .4; cursor: default; }
+.dia-times { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.dia-times b { font-size: 24px; font-variant-numeric: tabular-nums; }
+.dia-arrow { color: var(--sub); }
+.dia-times small { color: var(--sub); font-size: 13px; }
+.dia-line { font-size: 14px; margin-top: 2px; }
+.dia-sub, .dia-total, .dia-note-row { font-size: 12px; color: var(--sub); margin-top: 2px; }
+.dia-total { color: var(--accent); }
+.dia-current { font-size: 12px; font-weight: 700; color: var(--from); margin-top: 2px; }
+.dia-more {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 14px;
+  cursor: pointer;
+}
+.dia-more:disabled { color: var(--sub); }
+.tag-changed { background: var(--accent); }

@@ -230,16 +230,13 @@ async function fetchRoutes(q) {
 
 /**
  * 結果画面を表示する。
- * opts.tries に複数の条件を渡すと順に検索し、opts.accept を満たした最初の結果を表示する
- * （前後の電車が見つかるまで少しずつ時間を広げるため）。
+ * opts.resolve を渡すと、検索の前に日時を決める処理（1本前・1本後さがし）を挟む。
  */
 async function showResults(q, push, opts = {}) {
-  const tries = opts.tries || [q];
-  const accept = opts.accept || (() => true);
-  shownQuery = tries[0];
-  if (push) window.history.pushState({ view: 'result' }, '', resultUrl(tries[0]));
+  shownQuery = q;
+  if (push) window.history.pushState({ view: 'result' }, '', resultUrl(q));
   showView('result');
-  renderResultHead(tries[0]);
+  renderResultHead(q);
 
   const list = $('resultList');
   list.textContent = '';
@@ -248,20 +245,19 @@ async function showResults(q, push, opts = {}) {
   shownRoutes = [];
   resultLoading = true;
 
-  let data;
-  let used = tries[0];
-  for (const t of tries) {
-    data = await fetchRoutes(t);
-    if (seq !== searchSeq) return; // 新しい検索が始まっていたら捨てる
-    used = t;
-    if (data.routes && data.routes.length && accept(data.routes.map((r) => r.summary))) break;
+  if (opts.resolve) {
+    $('resultWhen').textContent = '前後の電車を探しています…';
+    const resolved = await opts.resolve();
+    if (seq !== searchSeq) return;
+    q = resolved;
+    shownQuery = q;
+    window.history.replaceState(window.history.state, '', resultUrl(q));
+    renderResultHead(q);
   }
+
+  const data = await fetchRoutes(q);
+  if (seq !== searchSeq) return; // 新しい検索が始まっていたら捨てる
   resultLoading = false;
-  if (used !== tries[0]) {
-    shownQuery = used;
-    window.history.replaceState(window.history.state, '', resultUrl(used));
-    renderResultHead(used);
-  }
 
   list.textContent = '';
   if (!data.routes || !data.routes.length) {
@@ -269,26 +265,27 @@ async function showResults(q, push, opts = {}) {
     box.append(el('p', '', data.error || '経路が見つかりませんでした'));
     const retry = el('button', 'chip', '再読み込み');
     retry.type = 'button';
-    retry.addEventListener('click', () => showResults(used, false));
+    retry.addEventListener('click', () => showResults(q, false));
     box.append(retry);
     list.append(box);
     return;
   }
   shownRoutes = data.routes;
-  data.routes.forEach((r, i) => list.append(renderRoute(r, i)));
+  data.routes.forEach((r, i) => list.append(renderRoute(r, i, i === 0)));
 }
 
-function renderRoute(route, index) {
+function renderRoute(route, index, expanded) {
   const s = route.summary;
   const card = el('article', 'card route');
 
   const head = el('button', 'route-head');
   head.type = 'button';
-  head.setAttribute('aria-expanded', index === 0 ? 'true' : 'false');
+  head.setAttribute('aria-expanded', String(expanded));
 
   const tags = el('div', 'tags');
   tags.append(el('span', 'route-no', `ルート${index + 1}`));
   s.tags.forEach((t) => tags.append(el('span', `tag tag-${{ 早: 'fast', 安: 'cheap', 楽: 'easy' }[t] || 'other'}`, t)));
+  if (route.changedAt != null) tags.append(el('span', 'tag tag-changed', '乗り継ぎを変更'));
   if (s.alert) tags.append(el('span', 'tag tag-alert', '⚠ 運行情報'));
   head.append(tags);
 
@@ -303,9 +300,9 @@ function renderRoute(route, index) {
   meta.textContent = parts.filter(Boolean).join(' ・ ');
   head.append(meta);
 
-  const detail = renderSteps(route.steps);
-  if (index === 0) detail.append(el('li', 'tl-hint', '発車時刻をタップすると、その駅から1本後の電車で調べ直せます'));
-  detail.hidden = index !== 0;
+  const detail = renderSteps(route.steps, index);
+  detail.append(el('li', 'tl-hint', '発車時刻をタップすると前後のダイヤを一覧で見られます。乗換駅の時刻なら、その駅から先の電車だけを変えられます'));
+  detail.hidden = !expanded;
   head.addEventListener('click', () => {
     detail.hidden = !detail.hidden;
     head.setAttribute('aria-expanded', String(!detail.hidden));
@@ -315,7 +312,7 @@ function renderRoute(route, index) {
   return card;
 }
 
-function renderSteps(steps) {
+function renderSteps(steps, routeIndex) {
   const ol = el('ol', 'timeline');
   steps.forEach((st, i) => {
     if (st.kind === 'station') {
@@ -325,8 +322,8 @@ function renderSteps(steps) {
       if (st.dep) {
         const dep = el('button', 'tl-dep', `${st.dep}発`);
         dep.type = 'button';
-        dep.setAttribute('aria-label', `${st.name} ${st.dep}発 の1本後で調べ直す`);
-        dep.addEventListener('click', () => openStepMenu(st));
+        dep.setAttribute('aria-label', `${st.name} ${st.dep}発 の前後のダイヤ`);
+        dep.addEventListener('click', () => openDia(routeIndex, i));
         time.append(dep);
       }
       const mark = el('div', 'tl-mark');
@@ -352,34 +349,194 @@ function renderSteps(steps) {
   return ol;
 }
 
-// 前後の時間で再検索（ホームの入力欄はそのまま）
+// 1本前・1本後で再検索（ホームの入力欄はそのまま、出発／到着の種類も変えない）
 function shiftSearch(direction) {
   const q = shownQuery;
   if (!q || resultLoading) return;
   const p = TimeShift.plan(direction, q.type, whenToDate(q.when), shownRoutes.map((r) => r.summary));
-  const tries = p.dates.map((d) => ({ ...q, type: p.type, when: dateToWhen(d) }));
-  showResults(tries[0], true, { tries, accept: p.accept });
+  if (!p.probe) {
+    showResults({ ...q, type: p.type, when: dateToWhen(p.date) }, true);
+    return;
+  }
+  showResults({ ...q, type: p.type, when: dateToWhen(p.fallback) }, true, {
+    resolve: async () => {
+      const data = await fetchRoutes({ ...q, type: p.probe.type, when: dateToWhen(p.probe.date) });
+      const d = TimeShift.resolve(p, (data.routes || []).map((r) => r.summary));
+      return { ...q, type: p.type, when: dateToWhen(d) };
+    },
+  });
 }
 
-// 経路の途中の発車時刻をタップ：その駅から1本後の電車で調べ直す
-let stepTarget = null;
-function openStepMenu(st) {
-  const q = shownQuery;
-  if (!q) return;
-  stepTarget = st;
-  $('stepTitle').textContent = `${st.name} ${st.dep}発`;
-  $('stepDesc').textContent = `この電車に乗れなかったら？ ${st.name} から ${q.to} まで、次の電車で調べ直します。`;
-  $('stepDlg').showModal();
+// ---------- 前後のダイヤ ----------
+// 経路の発車時刻をタップすると、その駅から目的地までの電車を一覧表示する。
+// 乗換駅の場合は、そこまでの電車はそのままにして出発駅からの全体ルートを作る。
+const MIN_MS = 60e3;
+let dia = null;
+
+function mainAccess(route) {
+  return route.steps.find((s) => s.kind === 'access' && !s.walk) || route.steps.find((s) => s.kind === 'access') || null;
 }
 
-function searchNextTrainFromStep() {
+function openDia(routeIndex, stepIndex) {
   const q = shownQuery;
-  const st = stepTarget;
-  $('stepDlg').close();
-  if (!q || !st) return;
-  const d = TimeShift.nextTrainFrom(st.dep, q.type, whenToDate(q.when));
+  const route = shownRoutes[routeIndex];
+  if (!q || !route) return;
+  const st = route.steps[stepIndex];
+  const anchor = TimeShift.anchorFor(q.type, whenToDate(q.when));
+  const originDep = TimeShift.nearDate(route.summary.dep, anchor);
+  const stDep = originDep && TimeShift.nearDate(st.dep, originDep);
+  if (!stDep) return;
+
+  dia = {
+    routeIndex,
+    stepIndex,
+    route,
+    st,
+    q: { ...q, from: st.name, via: stepIndex === 0 ? q.via : '', type: 'dep', coords: null },
+    originName: route.steps[0].name,
+    originDep,
+    stDep,
+    stArr: stepIndex > 0 && st.arr ? TimeShift.nearDate(st.arr, originDep) : null,
+    entries: new Map(),
+    nextT: new Date(+stDep - 30 * MIN_MS),
+    earlierFrom: null,
+    loading: false,
+    scrolled: false,
+  };
+  $('diaRoute').textContent = `${st.name} → ${q.to}`;
+  $('diaNote').textContent = stepIndex === 0
+    ? '時刻によって前後のルートが変わることがあります。選ぶとそのルートに切り替わります。'
+    : `${st.name}に${st.arr}着として、そこから先の電車を選べます。${dia.originName}からの全体の時刻も表示します。`;
+  renderDia();
+  $('diaDlg').showModal();
+  loadDiaLater(5, +stDep + 60 * MIN_MS);
+}
+
+function addDiaEntries(d, routes, t) {
+  for (const r of routes) {
+    const dep = TimeShift.nearDate(r.summary.dep, t);
+    let arr = dep && TimeShift.nearDate(r.summary.arr, dep);
+    if (!dep || !arr) continue;
+    if (arr < dep) arr = new Date(+arr + 24 * 3600e3);
+    const a = mainAccess(r);
+    const key = `${+dep}|${+arr}|${a ? a.line : ''}`;
+    if (!d.entries.has(key)) d.entries.set(key, { route: r, dep, arr });
+  }
+}
+
+// 後ろへ読み進める（読んだ中で最も遅い出発の 1 分後から次を検索）
+async function loadDiaLater(maxRequests, until) {
+  const d = dia;
+  if (!d || d.loading) return;
+  d.loading = true;
+  renderDia();
+  for (let i = 0; i < maxRequests; i++) {
+    const t = d.nextT;
+    const data = await fetchRoutes({ ...d.q, when: dateToWhen(t) });
+    if (dia !== d) return;
+    const routes = data.routes || [];
+    addDiaEntries(d, routes, t);
+    d.nextT = TimeShift.chainNext(routes.map((r) => r.summary), t);
+    renderDia();
+    if (until && +d.nextT > until) break;
+  }
+  d.loading = false;
+  renderDia();
+}
+
+// 前へさかのぼる（40 分前から今の先頭まで読み直す）
+async function loadDiaEarlier() {
+  const d = dia;
+  if (!d || d.loading) return;
+  const firstDep = d.entries.size ? Math.min(...[...d.entries.values()].map((e) => +e.dep)) : +d.stDep;
+  const limit = Math.min(firstDep, d.earlierFrom || Infinity);
+  let t = new Date(limit - 40 * MIN_MS);
+  d.earlierFrom = +t;
+  d.loading = true;
+  renderDia();
+  for (let i = 0; i < 3 && +t < limit; i++) {
+    const data = await fetchRoutes({ ...d.q, when: dateToWhen(t) });
+    if (dia !== d) return;
+    const routes = data.routes || [];
+    addDiaEntries(d, routes, t);
+    t = TimeShift.chainNext(routes.map((r) => r.summary), t);
+    renderDia();
+  }
+  d.loading = false;
+  renderDia();
+}
+
+function renderDia() {
+  const d = dia;
+  const list = $('diaList');
+  list.textContent = '';
   if (!d) return;
-  showResults({ ...q, from: st.name, via: '', type: 'dep', when: dateToWhen(d), coords: null }, true);
+  const pad2 = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+
+  const earlier = el('button', 'dia-more', d.loading ? '読み込み中…' : '▲ さらに前を表示');
+  earlier.type = 'button';
+  earlier.disabled = d.loading;
+  earlier.addEventListener('click', loadDiaEarlier);
+  list.append(earlier);
+
+  const entries = [...d.entries.values()].sort((a, b) => a.dep - b.dep || a.arr - b.arr);
+  let currentRow = null;
+  for (const e of entries) {
+    const r = e.route;
+    const tooEarly = d.stArr && e.dep < d.stArr;
+    const row = el('button', 'dia-row');
+    row.type = 'button';
+    row.disabled = !!tooEarly;
+    const isCurrent = +e.dep === +d.stDep && !currentRow;
+    if (isCurrent) { row.classList.add('current'); currentRow = row; }
+
+    const times = el('div', 'dia-times');
+    times.append(el('b', '', pad2(e.dep)), el('span', 'dia-arrow', '→'), el('b', '', pad2(e.arr)));
+    const legMeta = [`(${TimeShift.formatMinutes((e.arr - e.dep) / MIN_MS)})`];
+    if (r.summary.transfers != null) legMeta.push(`乗換${r.summary.transfers}回`);
+    times.append(el('small', '', legMeta.join(' ')));
+    row.append(times);
+
+    const a = mainAccess(r);
+    if (a) {
+      row.append(el('div', 'dia-line', a.line + (a.destination ? `・${a.destination}` : '')));
+      const plat = (a.platform || '').split('→')[0].trim();
+      if (plat) row.append(el('div', 'dia-sub', plat));
+    }
+    if (tooEarly) {
+      row.append(el('div', 'dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`));
+    } else if (d.stepIndex > 0) {
+      row.append(el('div', 'dia-total',
+        `全体：${d.originName} ${d.route.summary.dep}発 → ${pad2(e.arr)}着（${TimeShift.formatMinutes((e.arr - d.originDep) / MIN_MS)}）`));
+    }
+    if (isCurrent) row.append(el('div', 'dia-current', '表示中の電車'));
+    row.addEventListener('click', () => chooseDia(e));
+    list.append(row);
+  }
+
+  if (!entries.length && !d.loading) list.append(el('p', 'empty', '電車が見つかりませんでした'));
+
+  const later = el('button', 'dia-more', d.loading ? '読み込み中…' : '▼ さらに後を表示');
+  later.type = 'button';
+  later.disabled = d.loading;
+  later.addEventListener('click', () => loadDiaLater(3));
+  list.append(later);
+
+  if (currentRow && !d.scrolled) {
+    d.scrolled = true;
+    currentRow.scrollIntoView({ block: 'center' });
+  }
+}
+
+function chooseDia(e) {
+  const d = dia;
+  if (!d) return;
+  const combined = TimeShift.combineRoute(d.route, d.stepIndex, e.route);
+  shownRoutes[d.routeIndex] = combined;
+  const old = $('resultList').children[d.routeIndex];
+  if (old) old.replaceWith(renderRoute(combined, d.routeIndex, true));
+  $('diaDlg').close();
+  toast(`${d.st.name} ${e.route.summary.dep}発に変更しました`);
 }
 
 // ---------- 履歴・お気に入り ----------
@@ -697,8 +854,9 @@ function init() {
   window.addEventListener('pageshow', refreshNow);
   document.addEventListener('visibilitychange', refreshNow);
 
-  $('stepNextBtn').addEventListener('click', searchNextTrainFromStep);
-  $('stepDlg').addEventListener('click', (e) => { if (e.target === $('stepDlg')) $('stepDlg').close(); });
+  $('diaClose').addEventListener('click', () => $('diaDlg').close());
+  $('diaDlg').addEventListener('close', () => { dia = null; });
+  $('diaDlg').addEventListener('click', (e) => { if (e.target === $('diaDlg')) $('diaDlg').close(); });
 
   routeFromLocation(true);
 
