@@ -1,5 +1,5 @@
 // オフラインでも画面を開けるよう、アプリ本体だけをキャッシュする
-const CACHE = 'norikae-v1';
+const CACHE = 'norikae-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -27,6 +27,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return; // 検索結果はキャッシュしない
   e.respondWith(
     fetch(e.request)
       .then((res) => {

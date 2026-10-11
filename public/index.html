@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>のりかえ</title>
-  <meta name="description" content="広告なしのシンプルな乗り換え案内ランチャー">
+  <meta name="description" content="広告なしの乗り換え案内">
   <meta name="theme-color" content="#1665d8">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -18,11 +18,12 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>のりかえ</h1>
+    <button id="backBtn" class="icon-btn back" aria-label="戻る" hidden>‹</button>
+    <h1 id="title">のりかえ</h1>
     <button id="settingsBtn" class="icon-btn" aria-label="設定">⚙︎</button>
   </header>
 
-  <main>
+  <main id="formView">
     <form id="searchForm" class="card" autocomplete="off">
       <div class="stations">
         <div class="station-row">
@@ -32,7 +33,7 @@
         </div>
         <div class="station-row via-row" id="viaRow" hidden>
           <span class="dot via" aria-hidden="true"></span>
-          <input id="via" name="via" type="text" placeholder="経由駅（Yahooのみ）" list="stationList" enterkeyhint="next">
+          <input id="via" name="via" type="text" placeholder="経由駅" list="stationList" enterkeyhint="next">
           <button type="button" id="viaClose" class="chip" aria-label="経由を削除">✕</button>
         </div>
         <div class="station-row">
@@ -80,27 +81,64 @@
     </section>
   </main>
 
+  <main id="resultView" hidden>
+    <div class="result-head">
+      <p class="result-route" id="resultRoute"></p>
+      <p class="result-when" id="resultWhen"></p>
+    </div>
+    <div class="result-nav">
+      <button type="button" id="earlierBtn" class="chip">‹ 前の時間</button>
+      <button type="button" id="favFromResultBtn" class="chip">☆ 登録</button>
+      <button type="button" id="laterBtn" class="chip">次の時間 ›</button>
+    </div>
+    <div id="resultList" aria-live="polite"></div>
+    <div class="result-foot" id="resultFoot">
+      <a id="openYahoo" target="_blank" rel="noopener">Yahoo!乗換案内で開く（広告あり）</a>
+      <span>・</span>
+      <a id="openApple">Apple マップ</a>
+      <span>・</span>
+      <a id="openGoogle">Google マップ</a>
+    </div>
+  </main>
+
   <dialog id="settingsDlg">
     <form method="dialog" class="settings">
       <h2>設定</h2>
       <label class="field">
         <span>メインの検索先</span>
         <select id="engineSel">
+          <option value="app">アプリ内（Yahoo）</option>
           <option value="apple">Apple マップ</option>
           <option value="google">Google マップ</option>
-          <option value="yahooPrint">Yahoo 印刷版</option>
-          <option value="yahoo">Yahoo 通常版</option>
+          <option value="yahoo">Yahoo サイト</option>
         </select>
       </label>
 
       <fieldset>
-        <legend>Yahoo の検索条件</legend>
+        <legend>検索条件（Yahoo）</legend>
         <label class="field">
           <span>表示順</span>
           <select id="sortSel">
             <option value="0">到着が早い順</option>
             <option value="1">料金が安い順</option>
             <option value="2">乗換回数順</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>特急の席</span>
+          <select id="expkindSel">
+            <option value="1">自由席</option>
+            <option value="2">指定席</option>
+            <option value="3">グリーン</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>歩く速さ</span>
+          <select id="wsSel">
+            <option value="1">急いで</option>
+            <option value="2">少し急いで</option>
+            <option value="3">少しゆっくり</option>
+            <option value="4">ゆっくり</option>
           </select>
         </label>
         <label class="field">
