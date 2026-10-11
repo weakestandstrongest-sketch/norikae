@@ -336,3 +336,31 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .help ol { padding-left: 1.4em; margin: 0 0 12px; line-height: 1.7; font-size: 15px; }
 .help li { margin-bottom: 6px; }
 .help .hint { text-align: left; }
+
+/* 発車時刻をタップして1本後で調べる */
+.tl-dep {
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 2px 0;
+  text-align: right;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.tl-hint { display: block !important; color: var(--sub); font-size: 12px; padding-top: 10px; }
+.sheet p { line-height: 1.6; margin: 0 0 16px; }
+.secondary {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  font-size: 17px;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: var(--field);
+  color: var(--accent);
+  cursor: pointer;
+}

@@ -49,7 +49,11 @@ const pad = (n) => String(n).padStart(2, '0');
 function toLocalInputValue(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-function setNow() { whenEl.value = toLocalInputValue(new Date()); }
+let timeIsCustom = false; // 時刻を自分で指定したら true（勝手に「今」に戻さない）
+function setNow() {
+  whenEl.value = toLocalInputValue(new Date());
+  timeIsCustom = false;
+}
 function readWhen() {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(whenEl.value);
   if (!m) { setNow(); return readWhen(); }
@@ -157,6 +161,7 @@ function currentQuery() {
 
 function search(engine) {
   engine = engine || settings.engine;
+  if (!timeIsCustom) setNow(); // 「今」のまま時間がたっていたら最新の時刻で検索
   const q = currentQuery();
   const needsStation = engine === 'app' || engine === 'yahoo';
 
@@ -202,11 +207,7 @@ function el(tag, className, textContent) {
   return e;
 }
 
-async function showResults(q, push) {
-  shownQuery = q;
-  if (push) window.history.pushState({ view: 'result' }, '', resultUrl(q));
-  showView('result');
-
+function renderResultHead(q) {
   $('resultRoute').textContent = `${q.from} → ${q.to}` + (q.via ? `（${q.via} 経由）` : '');
   const w = q.when;
   const wd = '日月火水木金土'[whenToDate(w).getDay()];
@@ -216,6 +217,29 @@ async function showResults(q, push) {
   $('openYahoo').href = buildUrl('yahoo', q);
   $('openApple').href = buildUrl('apple', q);
   $('openGoogle').href = buildUrl('google', q);
+}
+
+async function fetchRoutes(q) {
+  try {
+    const res = await fetch('api/search?' + query(yahooParams(q)));
+    return await res.json();
+  } catch (e) {
+    return { error: '通信できませんでした。電波の良いところで再度お試しください', routes: [] };
+  }
+}
+
+/**
+ * 結果画面を表示する。
+ * opts.tries に複数の条件を渡すと順に検索し、opts.accept を満たした最初の結果を表示する
+ * （前後の電車が見つかるまで少しずつ時間を広げるため）。
+ */
+async function showResults(q, push, opts = {}) {
+  const tries = opts.tries || [q];
+  const accept = opts.accept || (() => true);
+  shownQuery = tries[0];
+  if (push) window.history.pushState({ view: 'result' }, '', resultUrl(tries[0]));
+  showView('result');
+  renderResultHead(tries[0]);
 
   const list = $('resultList');
   list.textContent = '';
@@ -225,14 +249,19 @@ async function showResults(q, push) {
   resultLoading = true;
 
   let data;
-  try {
-    const res = await fetch('api/search?' + query(yahooParams(q)));
-    data = await res.json();
-  } catch (e) {
-    data = { error: '通信できませんでした。電波の良いところで再度お試しください', routes: [] };
+  let used = tries[0];
+  for (const t of tries) {
+    data = await fetchRoutes(t);
+    if (seq !== searchSeq) return; // 新しい検索が始まっていたら捨てる
+    used = t;
+    if (data.routes && data.routes.length && accept(data.routes.map((r) => r.summary))) break;
   }
-  if (seq !== searchSeq) return; // 新しい検索が始まっていたら捨てる
   resultLoading = false;
+  if (used !== tries[0]) {
+    shownQuery = used;
+    window.history.replaceState(window.history.state, '', resultUrl(used));
+    renderResultHead(used);
+  }
 
   list.textContent = '';
   if (!data.routes || !data.routes.length) {
@@ -240,7 +269,7 @@ async function showResults(q, push) {
     box.append(el('p', '', data.error || '経路が見つかりませんでした'));
     const retry = el('button', 'chip', '再読み込み');
     retry.type = 'button';
-    retry.addEventListener('click', () => showResults(q, false));
+    retry.addEventListener('click', () => showResults(used, false));
     box.append(retry);
     list.append(box);
     return;
@@ -275,6 +304,7 @@ function renderRoute(route, index) {
   head.append(meta);
 
   const detail = renderSteps(route.steps);
+  if (index === 0) detail.append(el('li', 'tl-hint', '発車時刻をタップすると、その駅から1本後の電車で調べ直せます'));
   detail.hidden = index !== 0;
   head.addEventListener('click', () => {
     detail.hidden = !detail.hidden;
@@ -292,7 +322,13 @@ function renderSteps(steps) {
       const li = el('li', 'tl-station');
       const time = el('div', 'tl-time');
       if (st.arr) time.append(el('span', '', `${st.arr}着`));
-      if (st.dep) time.append(el('span', '', `${st.dep}発`));
+      if (st.dep) {
+        const dep = el('button', 'tl-dep', `${st.dep}発`);
+        dep.type = 'button';
+        dep.setAttribute('aria-label', `${st.name} ${st.dep}発 の1本後で調べ直す`);
+        dep.addEventListener('click', () => openStepMenu(st));
+        time.append(dep);
+      }
       const mark = el('div', 'tl-mark');
       mark.append(el('span', i === 0 ? 'tl-dot first' : i === steps.length - 1 ? 'tl-dot last' : 'tl-dot'));
       li.append(time, mark, el('div', 'tl-name', st.name));
@@ -316,14 +352,34 @@ function renderSteps(steps) {
   return ol;
 }
 
-// 前後の時間で再検索
+// 前後の時間で再検索（ホームの入力欄はそのまま）
 function shiftSearch(direction) {
   const q = shownQuery;
   if (!q || resultLoading) return;
-  const { type, date } = TimeShift.shift(direction, q.type, whenToDate(q.when), shownRoutes.map((r) => r.summary));
-  const next = { ...q, type, when: dateToWhen(date) };
-  fillForm(next);
-  showResults(next, true);
+  const p = TimeShift.plan(direction, q.type, whenToDate(q.when), shownRoutes.map((r) => r.summary));
+  const tries = p.dates.map((d) => ({ ...q, type: p.type, when: dateToWhen(d) }));
+  showResults(tries[0], true, { tries, accept: p.accept });
+}
+
+// 経路の途中の発車時刻をタップ：その駅から1本後の電車で調べ直す
+let stepTarget = null;
+function openStepMenu(st) {
+  const q = shownQuery;
+  if (!q) return;
+  stepTarget = st;
+  $('stepTitle').textContent = `${st.name} ${st.dep}発`;
+  $('stepDesc').textContent = `この電車に乗れなかったら？ ${st.name} から ${q.to} まで、次の電車で調べ直します。`;
+  $('stepDlg').showModal();
+}
+
+function searchNextTrainFromStep() {
+  const q = shownQuery;
+  const st = stepTarget;
+  $('stepDlg').close();
+  if (!q || !st) return;
+  const d = TimeShift.nextTrainFrom(st.dep, q.type, whenToDate(q.when));
+  if (!d) return;
+  showResults({ ...q, from: st.name, via: '', type: 'dep', when: dateToWhen(d), coords: null }, true);
 }
 
 // ---------- 履歴・お気に入り ----------
@@ -369,6 +425,7 @@ function fillForm(q) {
   fillRoute(q);
   setType(q.type);
   whenEl.value = `${whenDate(q.when)}T${whenTime(q.when)}`;
+  timeIsCustom = true;
 }
 
 function renderList(listEl, emptyEl, items, onDelete) {
@@ -557,14 +614,22 @@ function queryFromUrl() {
   };
 }
 
-function routeFromLocation() {
+// initial: ページを開いたとき（true）／戻る・進む操作のとき（false）
+function routeFromLocation(initial) {
   const parsed = queryFromUrl();
   if (!parsed) {
     showView('form');
     return;
   }
-  fillForm(parsed.q);
   const engine = parsed.engine || settings.engine;
+  if (!initial) {
+    // 戻る・進むでは結果だけ切り替え、ホームの入力欄はユーザーが入れたままにする
+    if (parsed.go) showResults(parsed.q, false);
+    else showView('form');
+    return;
+  }
+  fillForm(parsed.q);
+  if (!/^\d{1,2}:\d{2}$/.test(new URLSearchParams(location.search).get('time') || '')) timeIsCustom = false;
   if (parsed.go && engine === 'app') {
     showResults(parsed.q, false);
   } else if (parsed.go) {
@@ -619,17 +684,23 @@ function init() {
   $('favFromResultBtn').addEventListener('click', () => {
     if (shownQuery) addFavorite({ from: shownQuery.from, to: shownQuery.to, via: shownQuery.via });
   });
-  window.addEventListener('popstate', routeFromLocation);
+  window.addEventListener('popstate', () => routeFromLocation(false));
 
   const dlg = $('settingsDlg');
   $('settingsBtn').addEventListener('click', () => { loadSettingsForm(); dlg.showModal(); });
   dlg.addEventListener('change', saveSettingsForm);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 
-  // 他のアプリから戻ってきたときは時刻を今に更新
-  window.addEventListener('pageshow', (e) => { if (e.persisted && $('resultView').hidden) setNow(); });
+  // 時刻を自分で指定していなければ、アプリに戻ってきたときに「今」に更新
+  whenEl.addEventListener('input', () => { timeIsCustom = true; });
+  const refreshNow = () => { if (!timeIsCustom && document.visibilityState === 'visible') setNow(); };
+  window.addEventListener('pageshow', refreshNow);
+  document.addEventListener('visibilitychange', refreshNow);
 
-  routeFromLocation();
+  $('stepNextBtn').addEventListener('click', searchNextTrainFromStep);
+  $('stepDlg').addEventListener('click', (e) => { if (e.target === $('stepDlg')) $('stepDlg').close(); });
+
+  routeFromLocation(true);
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
