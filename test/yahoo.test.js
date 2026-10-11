@@ -7,7 +7,7 @@ const html = readFileSync(new URL('./fixtures/result.html', import.meta.url), 'u
 
 test('経路の概要を読み取る', () => {
   const { routes } = parseResult(html);
-  assert.equal(routes.length, 2);
+  assert.equal(routes.length, 3);
   const s = routes[0].summary;
   assert.equal(s.dep, '13:05');
   assert.equal(s.arr, '13:12');
@@ -23,7 +23,7 @@ test('経路の概要を読み取る', () => {
 test('入れ子の fareSection を順番通りに展開する', () => {
   const steps = parseResult(html).routes[0].steps;
   assert.deepEqual(steps.map((s) => s.kind), ['station', 'access', 'station', 'access', 'station']);
-  assert.deepEqual(steps[0], { kind: 'station', name: '新宿', arr: '', dep: '13:05' });
+  assert.deepEqual(steps[0], { kind: 'station', name: '新宿', arr: '', dep: '13:05', isStation: true });
   assert.equal(steps[1].line, 'JR山手線内回り');
   assert.equal(steps[1].destination, '渋谷行');
   assert.equal(steps[1].color, '#7ac142');
@@ -32,7 +32,7 @@ test('入れ子の fareSection を順番通りに展開する', () => {
   assert.equal(steps[2].dep, '13:10');
   assert.equal(steps[3].walk, true);
   assert.equal(steps[3].alert, true);
-  assert.equal(steps[3].color, '#ff0000');
+  assert.equal(steps[3].line, '徒歩');
   assert.equal(steps[4].arr, '13:12');
 });
 
@@ -64,4 +64,29 @@ test('検索 URL を作る', () => {
 test('不正な入力は InputError', () => {
   assert.throws(() => buildSearchUrl(new URLSearchParams('from=a')), InputError);
   assert.throws(() => buildSearchUrl(new URLSearchParams('from=a&to=b&date=x&time=1:00')), InputError);
+});
+
+test('町名から出発する徒歩区間：リンクの文字を消して「徒歩N分」にする', () => {
+  const steps = parseResult(html).routes[2].steps;
+  assert.equal(steps[0].name, '大須');
+  assert.equal(steps[0].isStation, false);
+  assert.equal(steps[1].walk, true);
+  assert.equal(steps[1].line, '徒歩2分');
+  assert.equal(steps[1].walkMinutes, 2);
+  assert.equal(steps[1].exit, '');
+  assert.equal(steps[1].platform, '');
+  assert.equal(steps[2].isStation, true);
+  assert.equal(steps[3].line, '名古屋市営鶴舞線');
+  assert.equal(steps[3].platform, '[発] 1番線');
+});
+
+test('徒歩区間の出口の情報', () => {
+  const page = `<div id="route01"><div class="routeSummary"><ul class="summary"><li class="time">10:00発→10:05着5分</li></ul></div>
+    <div class="routeDetail"><div class="station"><ul class="time"><li>10:00発</li></ul><dl><dt><a href="/station/top/1/">栄</a></dt></dl></div>
+    <div class="access"><ul class="info"><li class="transport">出口：16番 徒歩5分 地図でルート表示</li></ul></div>
+    <div class="station"><ul class="time"><li>10:05着</li></ul><dl><dt>名古屋テレビ塔</dt></dl></div></div></div>`;
+  const walk = parseResult(page).routes[0].steps[1];
+  assert.equal(walk.line, '徒歩5分');
+  assert.equal(walk.exit, '16番');
+  assert.equal(walk.platform, '出口：16番');
 });

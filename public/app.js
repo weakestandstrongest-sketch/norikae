@@ -42,7 +42,7 @@ const fromEl = $('from');
 const toEl = $('to');
 const viaEl = $('via');
 const whenEl = $('when');
-let fromCoords = null; // 「現在地」選択時の座標
+let fromCoords = null; // 現在地を使ったときの座標（label は出発欄に入れた住所）
 
 // ---------- 日時 ----------
 const pad = (n) => String(n).padStart(2, '0');
@@ -84,7 +84,7 @@ function query(params) {
 }
 
 function originFor(q) {
-  if (q.from === CURRENT_LOCATION || q.from === '') {
+  if (q.from === CURRENT_LOCATION || q.from === '' || (q.coords && q.coords.label === q.from)) {
     return q.coords ? `${q.coords.lat},${q.coords.lng}` : '';
   }
   return q.from;
@@ -339,6 +339,10 @@ function renderSteps(steps, routeIndex) {
       const body = el('div', 'tl-body');
       const line = el('div', 'tl-line', st.line + (st.destination ? ` ${st.destination}` : ''));
       body.append(line);
+      if (st.walk) {
+        const map = walkMapLink(steps[i - 1], steps[i + 1], i === 1);
+        if (map) body.append(map);
+      }
       const sub = [st.platform, st.stops].filter(Boolean).join(' ・ ');
       if (sub) body.append(el('div', 'tl-sub', sub));
       if (st.alert) body.append(el('div', 'tl-alert', `⚠ ${st.alertText || '運行情報あり'}`));
@@ -347,6 +351,29 @@ function renderSteps(steps, routeIndex) {
     }
   });
   return ol;
+}
+
+// 地図アプリで使える地名（駅は「〇〇駅」にする。「赤池(愛知県)」の括弧は外す）
+function placeForMap(st) {
+  if (!st || !st.name) return '';
+  if (!st.isStation) return st.name;
+  const n = st.name.replace(/[（(][^)）]*[)）]/g, '').trim();
+  return n.endsWith('駅') ? n : n + '駅';
+}
+
+// 徒歩区間の道順を Google マップで開くリンク
+function walkMapLink(fromSt, toSt, isFirst) {
+  const q = shownQuery;
+  let origin = placeForMap(fromSt);
+  // 現在地の住所から出発したときは、住所より正確な座標を使う
+  if (isFirst && q && q.coords && q.coords.label === q.from) origin = `${q.coords.lat},${q.coords.lng}`;
+  const destination = placeForMap(toSt);
+  if (!origin || !destination) return null;
+  const a = el('a', 'tl-map', 'Google マップで道順を見る ›');
+  a.href = 'https://www.google.com/maps/dir/?' + query({ api: 1, origin, destination, travelmode: 'walking' });
+  a.target = '_blank';
+  a.rel = 'noopener';
+  return a;
 }
 
 // 1本前・1本後で再検索（ホームの入力欄はそのまま、出発／到着の種類も変えない）
@@ -636,32 +663,38 @@ function renderLists() {
 }
 
 // ---------- 現在地 ----------
-async function nearestStations(lat, lng) {
+// 現在地の住所と最寄り駅を Worker に問い合わせる
+async function lookupHere(lat, lng) {
   const res = await fetch('api/nearest?' + query({ lat, lng }));
   const data = await res.json().catch(() => ({}));
-  if (!res.ok || !data.stations || !data.stations.length) throw new Error(data.error || 'no station');
-  return data.stations;
+  if (!data.address && !(data.stations && data.stations.length)) throw new Error(data.error || 'not found');
+  return { address: data.address || '', stations: data.stations || [] };
 }
 
 function getPosition(options) {
   return new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, options));
 }
 
-function renderNearby(stations) {
+// 出発欄の下に「現在地の住所」と近くの駅を並べ、タップで切り替えられるようにする
+function renderNearby(here, coords) {
   const row = $('nearbyRow');
   row.textContent = '';
-  row.hidden = stations.length < 2;
+  const choices = [];
+  if (here.address) choices.push({ label: '📍 現在地の住所', value: here.address, coords });
+  here.stations.forEach((st) => choices.push({ label: st.name, value: st.name, title: `${st.lines.join('・')} ${st.distance}` }));
+  row.hidden = choices.length < 2;
   if (row.hidden) return;
-  row.append(el('span', 'nearby-label', '近くの駅'));
-  stations.forEach((st) => {
-    const b = el('button', 'chip', st.name);
+  row.append(el('span', 'nearby-label', '出発地'));
+  choices.forEach((c) => {
+    const b = el('button', 'chip', c.label);
     b.type = 'button';
-    b.title = `${st.lines.join('・')} ${st.distance}`;
+    if (c.title) b.title = c.title;
     b.addEventListener('click', () => {
-      fromEl.value = st.name;
-      fromCoords = null;
-      row.hidden = true;
+      fromEl.value = c.value;
+      fromCoords = c.coords || null;
+      row.querySelectorAll('.chip').forEach((x) => x.classList.toggle('selected', x === b));
     });
+    if (fromEl.value === c.value) b.classList.add('selected');
     row.append(b);
   });
 }
@@ -677,7 +710,7 @@ async function useCurrentLocation() {
   let pos;
   try {
     // まずは速い測位（Wi-Fi など）、だめなら GPS で再試行
-    pos = await getPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 })
+    pos = await getPosition({ enableHighAccuracy: false, timeout: 8000, maximumAge: 120000 })
       .catch((e) => (e.code === 1 ? Promise.reject(e) : getPosition({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 })));
   } catch (e) {
     btn.disabled = false;
@@ -691,17 +724,25 @@ async function useCurrentLocation() {
   }
 
   const { latitude: lat, longitude: lng } = pos.coords;
+  const coords = { lat: lat.toFixed(6), lng: lng.toFixed(6) };
   try {
-    const stations = await nearestStations(lat, lng);
-    fromEl.value = stations[0].name;
-    fromCoords = null;
-    renderNearby(stations);
-    toast(`最寄り駅：${stations[0].name}（${stations[0].distance}）`);
+    const here = await lookupHere(lat, lng);
+    if (here.address) {
+      // 住所から出発（Yahoo が最寄り駅までの徒歩も含めて案内する）
+      fromEl.value = here.address;
+      fromCoords = { ...coords, label: here.address };
+      toast(`現在地：${here.address}`);
+    } else {
+      fromEl.value = here.stations[0].name;
+      fromCoords = null;
+      toast(`住所は取得できなかったので最寄り駅にしました：${here.stations[0].name}`);
+    }
+    renderNearby(here, fromCoords && fromCoords.label ? fromCoords : null);
   } catch (e) {
     fromEl.value = CURRENT_LOCATION;
-    fromCoords = { lat: lat.toFixed(6), lng: lng.toFixed(6) };
+    fromCoords = coords;
     $('nearbyRow').hidden = true;
-    toast('最寄り駅は取得できませんでした（地図アプリでは現在地から検索できます）');
+    toast('住所・最寄り駅を取得できませんでした（地図アプリでは現在地から検索できます）');
   }
   btn.disabled = false;
 }

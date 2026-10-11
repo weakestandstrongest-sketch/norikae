@@ -422,3 +422,16 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 }
 .dia-more:disabled { color: var(--sub); }
 .tag-changed { background: var(--accent); }
+
+/* 徒歩区間の地図リンク・出発地の候補 */
+.tl-map {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--field);
+}
+.nearby .chip.selected { background: var(--accent); color: var(--accent-text); }

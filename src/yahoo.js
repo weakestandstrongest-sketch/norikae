@@ -83,7 +83,10 @@ function parseSummary(routeEl) {
 }
 
 function parseStation(el) {
-  const name = text(el.querySelector('dl dt a')) || text(el.querySelector('dl dt'));
+  const link = el.querySelector('dl dt a');
+  const name = text(link) || text(el.querySelector('dl dt'));
+  // 駅ページへのリンクがあれば駅（住所や施設から検索したときの出発地点にはない）
+  const isStation = !!(link && /\/station\//.test(link.getAttribute('href') || ''));
   let arr = '';
   let dep = '';
   for (const li of el.querySelectorAll('ul.time li')) {
@@ -94,26 +97,57 @@ function parseStation(el) {
     else if (t.includes('発')) dep = m[1];
     else if (!dep) dep = m[1];
   }
-  return { kind: 'station', name, arr, dep };
+  return { kind: 'station', name, arr, dep, isStation };
+}
+
+// Yahoo のページにあるリンクの文字（アプリでは使えない）
+const JUNK_RE = /地図でルート表示|ルートを表示|地図を表示|地図を見る/g;
+
+function parseWalk(el) {
+  const all = text(el).replace(JUNK_RE, ' ');
+  const min = /徒歩\s*(\d+)\s*分/.exec(all);
+  const exit = /出口\s*[:：]?\s*(?!徒歩)([^\s:：]+?)(?=\s|徒歩|$)/.exec(all);
+  return {
+    walkMinutes: min ? Number(min[1]) : null,
+    exit: exit ? exit[1] : '',
+  };
 }
 
 function parseAccess(el) {
   const transport = el.querySelector('li.transport');
   const destination = text(transport && transport.querySelector('.destination'));
-  let line = text(transport);
-  if (destination) line = clean(line.replace(destination, ''));
+  let line = text(transport).replace(JUNK_RE, ' ');
+  if (destination) line = line.replace(destination, '');
+  line = clean(line);
+  const walk = /徒歩/.test(line) && !destination;
+  const status = el.querySelector('li.serviceStatus');
+  if (walk) {
+    const w = parseWalk(el);
+    return {
+      kind: 'access',
+      line: w.walkMinutes != null ? `徒歩${w.walkMinutes}分` : '徒歩',
+      destination: '',
+      color: '',
+      platform: w.exit ? `出口：${w.exit}` : '',
+      stops: '',
+      walk: true,
+      walkMinutes: w.walkMinutes,
+      exit: w.exit,
+      alert: !!(status && status.querySelector('.icnAlert')),
+      alertText: text(status),
+    };
+  }
   const lineEl = transport && transport.querySelector('.line');
   const style = (lineEl && lineEl.getAttribute('style')) || '';
   const color = /border-color:\s*(#[0-9a-fA-F]{3,8}|rgb\([^)]*\))/.exec(style);
-  const status = el.querySelector('li.serviceStatus');
   return {
     kind: 'access',
     line,
     destination,
     color: color ? color[1] : '',
-    platform: text(el.querySelector('li.platform')),
+    platform: clean(text(el.querySelector('li.platform')).replace(JUNK_RE, ' ')),
     stops: text(el.querySelector('li.stop')),
-    walk: /徒歩/.test(line) && !destination,
+    walk: false,
     alert: !!(status && status.querySelector('.icnAlert')),
     alertText: text(status),
   };
