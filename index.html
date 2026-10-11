@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>のりかえ</title>
+  <meta name="description" content="広告なしのシンプルな乗り換え案内ランチャー">
+  <meta name="theme-color" content="#1665d8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="のりかえ">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>のりかえ</h1>
+    <button id="settingsBtn" class="icon-btn" aria-label="設定">⚙︎</button>
+  </header>
+
+  <main>
+    <form id="searchForm" class="card" autocomplete="off">
+      <div class="stations">
+        <div class="station-row">
+          <span class="dot from" aria-hidden="true"></span>
+          <input id="from" name="from" type="text" placeholder="出発駅" list="stationList" enterkeyhint="next">
+          <button type="button" id="locBtn" class="chip" aria-label="現在地から">📍現在地</button>
+        </div>
+        <div class="station-row via-row" id="viaRow" hidden>
+          <span class="dot via" aria-hidden="true"></span>
+          <input id="via" name="via" type="text" placeholder="経由駅（Yahooのみ）" list="stationList" enterkeyhint="next">
+          <button type="button" id="viaClose" class="chip" aria-label="経由を削除">✕</button>
+        </div>
+        <div class="station-row">
+          <span class="dot to" aria-hidden="true"></span>
+          <input id="to" name="to" type="text" placeholder="到着駅" list="stationList" enterkeyhint="search">
+          <button type="button" id="viaBtn" class="chip">＋経由</button>
+        </div>
+        <button type="button" id="swapBtn" class="swap" aria-label="出発と到着を入れ替え">⇅</button>
+      </div>
+      <datalist id="stationList"></datalist>
+
+      <div class="seg" role="radiogroup" aria-label="日時の種類">
+        <label><input type="radio" name="type" value="dep" checked><span>出発</span></label>
+        <label><input type="radio" name="type" value="arr"><span>到着</span></label>
+        <label><input type="radio" name="type" value="first"><span>始発</span></label>
+        <label><input type="radio" name="type" value="last"><span>終電</span></label>
+      </div>
+
+      <div class="time-row">
+        <input id="when" type="datetime-local" aria-label="日時">
+        <button type="button" id="nowBtn" class="chip">今</button>
+      </div>
+
+      <button type="submit" class="primary" id="goBtn">検索</button>
+      <div class="alt-engines" id="altEngines"></div>
+      <p class="hint" id="engineHint"></p>
+    </form>
+
+    <section class="card" id="favSection">
+      <div class="section-head">
+        <h2>お気に入り</h2>
+        <button type="button" id="addFavBtn" class="link-btn">＋今の区間を登録</button>
+      </div>
+      <ul id="favList" class="list"></ul>
+      <p class="empty" id="favEmpty">よく使う区間を登録するとワンタップで検索できます。</p>
+    </section>
+
+    <section class="card" id="histSection">
+      <div class="section-head">
+        <h2>履歴</h2>
+        <button type="button" id="clearHistBtn" class="link-btn">消去</button>
+      </div>
+      <ul id="histList" class="list"></ul>
+      <p class="empty" id="histEmpty">検索履歴はまだありません。</p>
+    </section>
+  </main>
+
+  <dialog id="settingsDlg">
+    <form method="dialog" class="settings">
+      <h2>設定</h2>
+      <label class="field">
+        <span>メインの検索先</span>
+        <select id="engineSel">
+          <option value="apple">Apple マップ</option>
+          <option value="google">Google マップ</option>
+          <option value="yahooPrint">Yahoo 印刷版</option>
+          <option value="yahoo">Yahoo 通常版</option>
+        </select>
+      </label>
+
+      <fieldset>
+        <legend>Yahoo の検索条件</legend>
+        <label class="field">
+          <span>表示順</span>
+          <select id="sortSel">
+            <option value="0">到着が早い順</option>
+            <option value="1">料金が安い順</option>
+            <option value="2">乗換回数順</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>運賃</span>
+          <select id="ticketSel">
+            <option value="ic">IC優先</option>
+            <option value="normal">きっぷ優先</option>
+          </select>
+        </label>
+        <label class="toggle"><input type="checkbox" id="optShin"> 新幹線</label>
+        <label class="toggle"><input type="checkbox" id="optEx"> 有料特急</label>
+        <label class="toggle"><input type="checkbox" id="optAl"> 飛行機</label>
+        <label class="toggle"><input type="checkbox" id="optHb"> 高速バス</label>
+        <label class="toggle"><input type="checkbox" id="optLb"> 路線バス</label>
+        <label class="toggle"><input type="checkbox" id="optSr"> フェリー</label>
+      </fieldset>
+
+      <p class="hint">
+        URL で直接検索もできます：<br>
+        <code id="urlExample"></code>
+      </p>
+      <menu><button value="close" class="primary">閉じる</button></menu>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
