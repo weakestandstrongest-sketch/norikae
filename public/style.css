@@ -445,3 +445,18 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .dia-options-note { padding: 8px 16px 16px; }
 .dia-row .tags { margin-bottom: 2px; }
 #viaList .station-row:last-of-type { border-bottom: 1px solid var(--line); }
+
+/* 途中の駅・バス停 */
+.tl-stops-btn {
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.tl-stoplist { list-style: none; margin: 6px 0 2px; padding: 0 0 0 2px; }
+.tl-stoplist li { display: flex; gap: 10px; font-size: 13px; padding: 3px 0; color: var(--sub); }
+.tl-stop-time { font-variant-numeric: tabular-nums; min-width: 3em; }
+.tl-stop-name { color: var(--text); }

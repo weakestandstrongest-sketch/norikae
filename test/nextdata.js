@@ -29,7 +29,7 @@ export const searchResult = wrap({
       },
       edgeInfoList: [
         edge({ name: '青葉台', code: '100', rail: '架空本線快速', dest: '港町行', times: [{ time: '08:05', type: 3 }], fare: ['0_0', '830'],
-          pos: { departure: ['3', '番線'], arrival: ['1', '番線'] }, stops: [{ name: 'A' }, { name: 'B' }],
+          pos: { departure: ['3', '番線'], arrival: ['1', '番線'] }, stops: [{ name: 'A', departureTime: '08:12' }, { name: 'B', departureTime: '08:20' }],
           access: { type: 0, color: 'e91a4c' } }),
         edge({ name: '中央', code: '200', times: [{ time: '08:30', type: 2 }, { time: '08:33', type: 1 }],
           access: { type: 1, color: null }, exit: '北口' }),

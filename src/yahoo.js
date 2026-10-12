@@ -272,6 +272,11 @@ function routeFromFeature(fi) {
       color: access.color ? `#${access.color}` : '',
       platform: clean(platformText(e.ridingPositionInfo)),
       stops: `${stopCount + 1}駅`,
+      // 途中で止まる駅・バス停（乗る駅と降りる駅は含まない）
+      stopList: (e.stopStationList || []).map((x) => ({
+        name: clean(x.name),
+        time: x.departureTime || x.arrivalTime || '',
+      })).filter((x) => x.name),
       // 運賃の区間（"0_1" なら 0 番目の駅から 2 番目の駅まで通しで price 円）
       fareGroup: (e.priceInfo && e.priceInfo.edgeGroup) || '',
       farePrice: e.priceInfo ? toNumber(e.priceInfo.price) : null,

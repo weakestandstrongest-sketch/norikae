@@ -108,6 +108,7 @@ test('埋め込み JSON（__NEXT_DATA__）から経路を読む', () => {
   assert.equal(s[1].destination, '港町行');
   assert.equal(s[1].platform, '[発] 3番線 → [着] 1番線');
   assert.equal(s[1].stops, '3駅');
+  assert.deepEqual(s[1].stopList, [{ name: 'A', time: '08:12' }, { name: 'B', time: '08:20' }]);
   assert.equal(s[1].color, '#e91a4c');
   // 運賃の区間（0 番目の駅から 1 番目の駅まで 830 円）
   assert.equal(s[1].fareGroup, '0_0');

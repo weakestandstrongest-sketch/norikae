@@ -419,8 +419,32 @@ function renderSteps(steps, routeIndex) {
         const map = walkMapLink(steps[i - 1], steps[i + 1], i === 1);
         if (map) body.append(map);
       }
-      const sub = [st.platform, st.stops].filter(Boolean).join(' ・ ');
-      if (sub) body.append(el('div', 'tl-sub', sub));
+      const sub = el('div', 'tl-sub');
+      if (st.platform) sub.append(st.platform);
+      if (st.stops && st.stopList && st.stopList.length) {
+        // 「24駅」をタップすると途中の駅・バス停を開く
+        if (st.platform) sub.append(' ・ ');
+        const toggle = el('button', 'tl-stops-btn', `${st.stops} ▾`);
+        toggle.type = 'button';
+        toggle.setAttribute('aria-expanded', 'false');
+        const ul = el('ul', 'tl-stoplist');
+        ul.hidden = true;
+        st.stopList.forEach((x) => {
+          const li = el('li');
+          li.append(el('span', 'tl-stop-time', x.time), el('span', 'tl-stop-name', x.name));
+          ul.append(li);
+        });
+        toggle.addEventListener('click', () => {
+          ul.hidden = !ul.hidden;
+          toggle.setAttribute('aria-expanded', String(!ul.hidden));
+          toggle.textContent = `${st.stops} ${ul.hidden ? '▾' : '▴'}`;
+        });
+        sub.append(toggle);
+        body.append(sub, ul);
+      } else {
+        if (st.stops) sub.append(`${st.platform ? ' ・ ' : ''}${st.stops}`);
+        if (sub.textContent) body.append(sub);
+      }
       if (st.alert) body.append(el('div', 'tl-alert', `⚠ ${st.alertText || '運行情報あり'}`));
       li.append(el('div', 'tl-time'), mark, body);
       ol.append(li);
@@ -763,6 +787,7 @@ async function buildTrainOptions(d, row) {
       {
         kind: 'access', line: trainLine, destination: `${t.destination}行`, color: (d.train && d.train.color) || '',
         platform: t.track ? `[発] ${t.track}番線` : '', stops: `${nStops}駅`, walk: false, alert: false, alertText: '',
+        stopList: stops.slice(Math.max(here, 0) + 1, stops.indexOf(S)).map((x) => ({ name: nameOf(x), time: x.dep || x.arr || '' })),
       },
     ];
     // この電車で S まで乗った場合の運賃。同じ会社の電車だけを使う経路の運賃を使う
