@@ -165,7 +165,7 @@ const TimeShift = (() => {
         transfers: transfersOf(steps),
         // 徒歩のあとに乗るだけなら運賃は差し替え先と同じ。乗り継ぎを変えた場合は分からないので出さない
         fare: walkOnly ? tail.summary.fare : null,
-        fareNote: '',
+        fareNote: walkOnly ? tail.summary.fareNote || '' : '',
         distance: '',
         tags: [],
         alert: route.summary.alert || tail.summary.alert,

@@ -323,7 +323,7 @@ function renderRoute(route, index, expanded) {
   const meta = el('div', 'meta');
   const parts = [s.duration];
   if (s.transfers != null) parts.push(`乗換 ${s.transfers}回`);
-  if (s.fare != null) parts.push(`${s.fare.toLocaleString('ja-JP')}円`);
+  if (s.fare != null) parts.push(`${s.fareNote === '目安' ? '約' : ''}${s.fare.toLocaleString('ja-JP')}円`);
   meta.textContent = parts.filter(Boolean).join(' ・ ');
   head.append(meta);
 
@@ -617,96 +617,20 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
+// その電車の経路を「途中のどこで乗り換えるか」ごとに作り、早い・安い・乗換が少ないなどから選べるようにする
 async function buildTrainRoute(d, row) {
   if (row.building) return;
   row.building = true;
+  row.error = null;
   renderDia();
   try {
-    const t = row.train;
-    const res = await fetch('api/train?' + query({
-      code: d.st.code, group: d.tt.groupId, train: t.trainId, kind: d.tt.kind || '',
-      hh: Math.floor(t.min / 60), mm: t.min % 60,
-    }));
-    const data = await res.json().catch(() => ({ error: `列車の情報を取得できませんでした（${res.status}）` }));
+    const options = await buildTrainOptions(d, row);
     if (dia !== d) return;
-    if (!res.ok || !data.stops || !data.stops.length) throw Object.assign(new Error(data.error || '停車駅が分かりませんでした'), { detail: data });
-
-    const stops = data.stops;
-    let here = stops.findIndex((s) => normText(s.name) === normText(d.st.name));
-    if (here < 0) here = stops.findIndex((s) => s.dep === t.time);
-    const later = stops.slice(here + 1);
-    if (!later.length) throw Object.assign(new Error('この駅より先の停車駅が分かりませんでした'), { detail: { stops } });
-
-    // 乗り換え候補：Yahoo の検索結果に出てきた駅と、この電車の終点（なければ全部の停車駅）
-    const known = new Set((row.searchRoutes || []).flatMap((r) => r.steps.filter((s) => s.kind === 'station').map((s) => normText(s.name))));
-    const destName = normText(d.q.to);
-    let cands = later.filter((s, k) => known.has(normText(s.name)) || normText(s.name) === destName || k === later.length - 1);
-    if (cands.length < 2) cands = later;
-    cands = cands.slice(0, 12);
-
-    const results = await mapLimit(cands, 3, async (S) => {
-      let atS = TimeShift.nearDate(S.arr || S.dep, row.dep);
-      if (atS && atS < row.dep) atS = new Date(+atS + 24 * 3600e3);
-      if (!atS) return null;
-      if (normText(S.name) === destName) return { S, cont: null, arr: atS, transfers: 0 };
-      const r = await fetchRoutes({ ...d.q, from: S.name, via: '', type: 'dep', when: dateToWhen(atS), coords: null });
-      let best = null;
-      for (const c of (r && r.routes) || []) {
-        let a = TimeShift.nearDate(c.summary.arr, atS);
-        if (a && a < atS) a = new Date(+a + 24 * 3600e3);
-        const tr = c.summary.transfers == null ? 9 : c.summary.transfers;
-        if (a && (!best || a < best.arr || (+a === +best.arr && tr < best.transfers))) best = { S, cont: c, arr: a, transfers: tr };
-      }
-      return best;
-    });
-    if (dia !== d) return;
-
-    // 一番早く着くもの。同じなら乗り換えが少ないもの、さらに同じなら長く乗っていられる（後の）駅
-    let pick = null;
-    results.forEach((x, k) => {
-      if (!x) return;
-      x.k = k;
-      if (!pick || x.arr < pick.arr || (+x.arr === +pick.arr && (x.transfers < pick.transfers || (x.transfers === pick.transfers && k > pick.k)))) pick = x;
-    });
-    if (!pick) throw Object.assign(new Error('乗り換え先の経路が見つかりませんでした'), { detail: { stops, cands: cands.map((c) => c.name) } });
-
-    const S = pick.S;
-    const nStops = stops.indexOf(S) - Math.max(here, 0);
-    const steps = [
-      { kind: 'station', name: d.st.name, arr: '', dep: t.time, isStation: true, code: d.st.code },
-      {
-        kind: 'access',
-        line: d.tt.railName + (t.kind && t.kind !== '普通' ? t.kind : ''),
-        destination: `${t.destination}行`,
-        color: (d.train && d.train.color) || '',
-        platform: t.track ? `[発] ${t.track}番線` : '',
-        stops: `${nStops}駅`,
-        walk: false,
-        alert: false,
-        alertText: '',
-      },
-      { kind: 'station', name: S.name, arr: S.arr || S.dep, dep: pick.cont ? pick.cont.steps[0].dep : '', isStation: true, code: S.code || '' },
-      ...(pick.cont ? pick.cont.steps.slice(1) : []),
-    ];
-    const tail = {
-      summary: {
-        dep: t.time,
-        arr: `${pad(pick.arr.getHours())}:${pad(pick.arr.getMinutes())}`,
-        duration: TimeShift.formatMinutes((pick.arr - row.dep) / MIN_MS),
-        transfers: Math.max(0, steps.filter((s) => s.kind === 'access' && !s.walk).length - 1),
-        fare: null,
-        fareNote: '',
-        distance: '',
-        tags: [],
-        alert: !!(pick.cont && pick.cont.summary.alert),
-      },
-      steps,
-    };
-    row.route = tail;
-    row.arr = pick.arr;
-    row.exact = true;
     row.building = false;
-    chooseDia({ route: tail });
+    if (!options.length) throw new Error('この電車を使う経路が見つかりませんでした');
+    d.view = { row, options };
+    renderDia();
+    $('diaList').scrollTop = 0;
   } catch (e) {
     row.building = false;
     if (dia !== d) return;
@@ -716,6 +640,207 @@ async function buildTrainRoute(d, row) {
       report: JSON.stringify({ error: e.message, train: row.train, station: d.st, group: d.tt.groupId, kind: d.tt.kind, detail: e.detail || null }),
     };
     renderDia();
+  }
+}
+
+// 路線名の頭（「名鉄」「JR」など）。同じ会社で乗り継ぐと運賃は通しになるので、足し算は目安になる
+const companyOf = (line) => normText(line).replace(/^(JR|名鉄|近鉄|京王|東急|小田急|京急|京成|西武|東武|南海|阪急|阪神|京阪|西鉄|東京メトロ|都営|大阪メトロ).*/, '$1').slice(0, 4);
+const firstTrainLine = (r) => { const a = r.steps.find((s) => s.kind === 'access' && !s.walk); return a ? a.line : ''; };
+
+function trainRouteKey(r) {
+  return r.steps.map((s) => (s.kind === 'station' ? `${s.name}${s.arr}${s.dep}` : s.line)).join('|');
+}
+
+async function buildTrainOptions(d, row) {
+  const t = row.train;
+  const options = [];
+  const add = (route, fare, fareApprox, via) => {
+    let arr = TimeShift.nearDate(route.summary.arr, row.dep);
+    if (arr && arr < row.dep) arr = new Date(+arr + 24 * 3600e3);
+    if (!arr) return;
+    route.summary.fare = fare;
+    route.summary.fareNote = fareApprox ? '目安' : '';
+    options.push({ route, arr, fare, fareApprox, transfers: route.summary.transfers == null ? 9 : route.summary.transfers, via });
+  };
+
+  // 1) Yahoo の検索結果にそのままこの電車を使う経路があれば、それも候補に（運賃も正確）
+  for (const r of row.searchRoutes || []) {
+    if (r.steps[0] && r.steps[0].dep === t.time && isSameTrain(r, t)) add(r, r.summary.fare, false, '');
+  }
+
+  // 2) 列車の停車駅を調べ、途中の駅で乗り換えた場合をそれぞれ検索する
+  const res = await fetch('api/train?' + query({
+    code: d.st.code, group: d.tt.groupId, train: t.trainId, kind: d.tt.kind || '',
+    hh: Math.floor(t.min / 60), mm: t.min % 60,
+  }));
+  const data = await res.json().catch(() => ({ error: `列車の情報を取得できませんでした（${res.status}）` }));
+  if (dia !== d) return [];
+  if (!res.ok || !data.stops || !data.stops.length) {
+    if (options.length) return rankOptions(options);
+    throw Object.assign(new Error(data.error || '停車駅が分かりませんでした'), { detail: data });
+  }
+  const stops = data.stops;
+  let here = stops.findIndex((s) => normText(s.name) === normText(d.st.name));
+  if (here < 0) here = stops.findIndex((s) => s.dep === t.time);
+  const later = stops.slice(here + 1);
+
+  // 乗り換え候補：検索結果に出てきた駅・終点。少なければ途中の駅も足す
+  const known = new Set([...(row.searchRoutes || []), ...shownRoutes]
+    .flatMap((r) => r.steps.filter((s) => s.kind === 'station').map((s) => normText(s.name))));
+  const destName = normText(d.q.to);
+  let cands = later.filter((s, k) => known.has(normText(s.name)) || normText(s.name) === destName || k === later.length - 1);
+  for (const s of later) {
+    if (cands.length >= 5) break;
+    if (!cands.includes(s)) cands.push(s);
+  }
+  cands = later.filter((s) => cands.includes(s)).slice(0, 8);
+
+  const trainLine = d.tt.railName + (t.kind && t.kind !== '普通' ? t.kind : '');
+  await mapLimit(cands, 3, async (S) => {
+    let atS = TimeShift.nearDate(S.arr || S.dep, row.dep);
+    if (atS && atS < row.dep) atS = new Date(+atS + 24 * 3600e3);
+    if (!atS) return;
+    const nStops = stops.indexOf(S) - Math.max(here, 0);
+    const legSteps = [
+      { kind: 'station', name: d.st.name, arr: '', dep: t.time, isStation: true, code: d.st.code },
+      {
+        kind: 'access', line: trainLine, destination: `${t.destination}行`, color: (d.train && d.train.color) || '',
+        platform: t.track ? `[発] ${t.track}番線` : '', stops: `${nStops}駅`, walk: false, alert: false, alertText: '',
+      },
+    ];
+    // この電車で S まで乗った場合の運賃（同じ路線の 1 本だけの経路を探す）
+    const legFareP = fetchRoutes({ ...d.q, to: S.name, via: '', type: 'dep', when: dateToWhen(row.dep), coords: null })
+      .then((r) => {
+        const one = ((r && r.routes) || []).find((x) => x.summary.transfers === 0 && companyOf(firstTrainLine(x)) === companyOf(trainLine));
+        return one ? one.summary.fare : null;
+      });
+
+    if (normText(S.name) === destName) {
+      const legFare = await legFareP;
+      const steps = [...legSteps, { kind: 'station', name: S.name, arr: S.arr || S.dep, dep: '', isStation: true, code: S.code || '' }];
+      add(makeTail(row, steps, atS), legFare, false, S.name);
+      return;
+    }
+    const [contData, legFare] = await Promise.all([
+      fetchRoutes({ ...d.q, from: S.name, via: '', type: 'dep', when: dateToWhen(atS), coords: null }),
+      legFareP,
+    ]);
+    for (const c of (contData && contData.routes) || []) {
+      // 乗った電車にそのまま乗り続ける経路は、もっと先の駅の候補と同じなので除く
+      const cLine = normText(firstTrainLine(c));
+      if (c.steps[0] && c.steps[0].dep === (S.dep || '') && cLine === normText(trainLine)) continue;
+      const steps = [
+        ...legSteps,
+        { kind: 'station', name: S.name, arr: S.arr || S.dep, dep: c.steps[0] ? c.steps[0].dep : '', isStation: true, code: S.code || '' },
+        ...c.steps.slice(1),
+      ];
+      const fare = legFare != null && c.summary.fare != null ? legFare + c.summary.fare : null;
+      const sameCompany = companyOf(cLine) === companyOf(trainLine);
+      add(makeTail(row, steps, null, c), fare, sameCompany, S.name);
+    }
+  });
+  return rankOptions(options);
+}
+
+// 組み立てた経路のまとめ（到着・所要時間・乗換回数）
+function makeTail(row, steps, arrAt, cont) {
+  const last = steps[steps.length - 1];
+  const arr = cont ? cont.summary.arr : last.arr;
+  let arrDate = TimeShift.nearDate(arr, row.dep);
+  if (arrDate && arrDate < row.dep) arrDate = new Date(+arrDate + 24 * 3600e3);
+  return {
+    summary: {
+      dep: row.train.time,
+      arr,
+      duration: arrDate ? TimeShift.formatMinutes((arrDate - row.dep) / MIN_MS) : '',
+      transfers: Math.max(0, steps.filter((s) => s.kind === 'access' && !s.walk).length - 1),
+      fare: null,
+      fareNote: '',
+      distance: '',
+      tags: [],
+      alert: !!(cont && cont.summary.alert),
+    },
+    steps,
+  };
+}
+
+function isSameTrain(r, t) {
+  const a = r.steps.find((s) => s.kind === 'access');
+  if (!a || a.walk) return false;
+  const line = normText(a.line);
+  const dest = normText(t.destination);
+  const kindOk = !t.kind || line.endsWith(normText(t.kind)) || (t.kind === '普通' && !/(急|快|特|準)/.test(line.slice(-4)));
+  return kindOk && (!dest || normText(a.destination).startsWith(dest));
+}
+
+// 重複を除いて到着順に並べ、早・安・楽の印を付ける
+function rankOptions(options) {
+  const seen = new Set();
+  const list = options.filter((o) => {
+    const k = trainRouteKey(o.route);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  // 到着・運賃・乗換回数のどれも他より良くないもの（意味のない乗り換えなど）は出さない
+  const fareOf = (o) => (o.fare == null ? 1e9 : o.fare);
+  const kept = list.filter((o) => !list.some((p) => p !== o
+    && +p.arr <= +o.arr && p.transfers <= o.transfers && fareOf(p) <= fareOf(o)
+    && (+p.arr < +o.arr || p.transfers < o.transfers || fareOf(p) < fareOf(o))));
+  list.length = 0;
+  list.push(...kept);
+  list.sort((a, b) => a.arr - b.arr || (a.fare ?? 1e9) - (b.fare ?? 1e9) || a.transfers - b.transfers);
+  const minArr = Math.min(...list.map((o) => +o.arr));
+  const fares = list.map((o) => o.fare).filter((f) => f != null);
+  const minFare = fares.length ? Math.min(...fares) : null;
+  const minTr = Math.min(...list.map((o) => o.transfers));
+  for (const o of list) {
+    const tags = [];
+    if (+o.arr === minArr) tags.push('早');
+    if (minFare != null && o.fare === minFare) tags.push('安');
+    if (o.transfers === minTr) tags.push('楽');
+    o.route.summary.tags = tags;
+  }
+  return list.slice(0, 10);
+}
+
+// 選んだ電車を使う経路の候補一覧
+function renderTrainOptions(d, list) {
+  const { row, options } = d.view;
+  const t = row.train;
+  const back = el('button', 'dia-more dia-back', '‹ 前後のダイヤに戻る');
+  back.type = 'button';
+  back.addEventListener('click', () => { d.view = null; d.scrolled = false; renderDia(); });
+  list.append(back);
+  list.append(el('p', 'dia-options-title', `${t.time}発 ${d.tt.railName}${t.kind && t.kind !== '普通' ? t.kind : ''}・${t.destination}行 を使う経路`));
+
+  const hm = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  for (const o of options) {
+    const s = o.route.summary;
+    const btn = el('button', 'dia-row');
+    btn.type = 'button';
+    const tags = el('div', 'tags');
+    s.tags.forEach((tg) => tags.append(el('span', `tag tag-${{ 早: 'fast', 安: 'cheap', 楽: 'easy' }[tg]}`, tg)));
+    if (s.tags.length) btn.append(tags);
+
+    const times = el('div', 'dia-times');
+    times.append(el('b', '', t.time), el('span', 'dia-arrow', '→'), el('b', '', hm(o.arr)));
+    times.append(el('small', '', `(${s.duration}) 乗換${s.transfers}回`));
+    btn.append(times);
+
+    const fareText = o.fare != null ? `${o.fareApprox ? '約' : ''}${o.fare.toLocaleString('ja-JP')}円` : '運賃不明';
+    btn.append(el('div', 'dia-line', fareText + (o.via ? `・${o.via}で乗り換え` : '')));
+    const lines = o.route.steps.filter((x) => x.kind === 'access' && !x.walk).map((x) => x.line);
+    btn.append(el('div', 'dia-sub', lines.join(' → ')));
+    if (d.stepIndex > 0) btn.append(el('div', 'dia-total', diaTotalText(d, row.dep, o.arr)));
+    btn.addEventListener('click', () => {
+      row.route = o.route;
+      chooseDia({ route: o.route });
+    });
+    list.append(btn);
+  }
+  if (options.some((o) => o.fareApprox)) {
+    list.append(el('p', 'dia-note-row dia-options-note', '「約」の運賃は、乗り換え前後の運賃を足した目安です。'));
   }
 }
 
@@ -781,18 +906,16 @@ function renderTimetableDia(d, list) {
     if (r.state === 'tooEarly') {
       btn.append(el('div', 'dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`));
     } else if (r.state === 'done' && r.arr && !r.exact) {
-      btn.append(el('div', 'dia-note-row', '到着は目安（タップでこの電車を使う経路を作ります）'));
+      btn.append(el('div', 'dia-note-row', '到着は目安（タップでこの電車を使う経路を探します）'));
     } else if (r.state === 'done' && r.arr && d.stepIndex > 0) {
       btn.append(el('div', 'dia-total',
         diaTotalText(d, r.dep, r.arr)));
     }
     if (isCurrent) btn.append(el('div', 'dia-current', '表示中の電車'));
-    if (r.building) btn.append(el('div', 'dia-current', 'この電車の経路を作っています…'));
+    if (r.building) btn.append(el('div', 'dia-current', 'この電車を使う経路を探しています…'));
     if (r.error && !r.building) btn.append(el('div', 'dia-error', `経路を作れませんでした：${r.error.message}`));
     btn.addEventListener('click', () => {
-      if (r.state !== 'done') { toast('検索中です'); return; }
-      if (r.exact) { chooseDia({ route: r.route }); return; }
-      r.error = null;
+      if (r.state !== 'done') return;
       buildTrainRoute(d, r);
     });
     list.append(btn);
@@ -873,6 +996,7 @@ function renderDia() {
   if (!d) return;
   if (d.mode === 'timetable') {
     if (d.loading || !d.rows) list.append(el('p', 'loading', '時刻表を読み込み中…'));
+    else if (d.view) renderTrainOptions(d, list);
     else renderTimetableDia(d, list);
     return;
   }
