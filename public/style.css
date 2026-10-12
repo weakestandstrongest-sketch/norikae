@@ -444,3 +444,4 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .dia-options-title { margin: 4px 16px 8px; font-weight: 700; font-size: 15px; }
 .dia-options-note { padding: 8px 16px 16px; }
 .dia-row .tags { margin-bottom: 2px; }
+#viaList .station-row:last-of-type { border-bottom: 1px solid var(--line); }

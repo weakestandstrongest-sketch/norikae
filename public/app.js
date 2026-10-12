@@ -40,7 +40,9 @@ const CURRENT_LOCATION = '現在地';
 const $ = (id) => document.getElementById(id);
 const fromEl = $('from');
 const toEl = $('to');
-const viaEl = $('via');
+const VIA_SEP = '、';
+const MAX_VIA = 3;
+const splitVia = (v) => (v || '').split(VIA_SEP).map((x) => x.trim()).filter(Boolean).slice(0, MAX_VIA);
 const whenEl = $('when');
 let fromCoords = null; // 現在地を使ったときの座標（label は出発欄に入れた住所）
 
@@ -78,6 +80,7 @@ const TYPE_LABEL = { dep: '出発', arr: '到着', first: '始発', last: '終�
 // ---------- URL 生成 ----------
 function query(params) {
   return Object.entries(params)
+    .flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : [[k, v]]))
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join('&');
@@ -97,7 +100,7 @@ function yahooParams(q) {
   return {
     from: q.from,
     to: q.to,
-    via: q.via,
+    via: splitVia(q.via),
     date: whenDate(w),
     time: whenTime(w),
     type: q.type,
@@ -140,11 +143,56 @@ function buildUrl(engine, q) {
   const p = yahooParams(q);
   const typeCode = { dep: 1, arr: 4, first: 3, last: 2 }[q.type];
   return 'https://transit.yahoo.co.jp/search/result?' + query({
-    from: p.from, to: p.to, via: p.via,
+    from: p.from, to: p.to, via: p.via,  // 経由駅は複数可（via=A&via=B）
     y: w.y, m: pad(w.mo), d: pad(w.d), hh: pad(w.h), m1: Math.floor(w.mi / 10), m2: w.mi % 10,
     type: typeCode, ticket: p.ticket, expkind: p.expkind, userpass: 1, ws: p.ws, s: p.s,
     al: p.al, shin: p.shin, ex: p.ex, hb: p.hb, lb: p.lb, sr: p.sr,
   });
+}
+
+// ---------- 経由駅（最大 3 つ） ----------
+function viaInputs() {
+  return [...document.querySelectorAll('#viaList input')];
+}
+
+function setVias(values) {
+  const list = $('viaList');
+  list.textContent = '';
+  values.slice(0, MAX_VIA).forEach((v, i) => {
+    const row = el('div', 'station-row via-row');
+    row.append(el('span', 'dot via'));
+    const input = el('input');
+    input.type = 'text';
+    input.placeholder = `経由駅${values.length > 1 ? i + 1 : ''}`;
+    input.setAttribute('list', 'stationList');
+    input.setAttribute('enterkeyhint', 'next');
+    input.value = v;
+    const del = el('button', 'chip', '✕');
+    del.type = 'button';
+    del.setAttribute('aria-label', '経由を削除');
+    del.addEventListener('click', () => {
+      const rest = viaInputs().map((x) => x.value);
+      rest.splice(i, 1);
+      setVias(rest);
+    });
+    row.append(input, del);
+    list.append(row);
+  });
+  $('viaBtn').hidden = values.length >= MAX_VIA;
+}
+
+// 検索結果に出てきた駅名を覚えて、入力候補に出す（最大 150 件）
+function rememberStations(routes) {
+  const seen = store.get('seenStations', []);
+  const set = new Set(seen);
+  for (const r of routes) {
+    for (const st of r.steps) {
+      if (st.kind === 'station' && st.isStation && st.name && !st.name.includes('/')) set.add(st.name);
+    }
+  }
+  if (set.size === seen.length) return;
+  store.set('seenStations', [...set].slice(-150));
+  renderLists();
 }
 
 // ---------- 検索 ----------
@@ -152,7 +200,7 @@ function currentQuery() {
   return {
     from: fromEl.value.trim(),
     to: toEl.value.trim(),
-    via: $('viaRow').hidden ? '' : viaEl.value.trim(),
+    via: viaInputs().map((i) => i.value.trim()).filter(Boolean).join(VIA_SEP),
     type: getType(),
     when: readWhen(),
     coords: fromCoords,
@@ -208,7 +256,7 @@ function el(tag, className, textContent) {
 }
 
 function renderResultHead(q) {
-  $('resultRoute').textContent = `${q.from} → ${q.to}` + (q.via ? `（${q.via} 経由）` : '');
+  $('resultRoute').textContent = `${q.from} → ${q.to}` + (q.via ? `（${splitVia(q.via).join('・')} 経由）` : '');
   const w = q.when;
   const wd = '日月火水木金土'[whenToDate(w).getDay()];
   $('resultWhen').textContent = q.type === 'first' || q.type === 'last'
@@ -272,6 +320,7 @@ async function showResults(q, push, opts = {}) {
   }
   shownRoutes = data.routes;
   data.routes.forEach((r, i) => list.append(renderRoute(r, i, i === 0)));
+  rememberStations(data.routes);
   if (data.total > data.routes.length) list.append(moreRoutesButton(q, seq, 2, data.total));
 }
 
@@ -1126,7 +1175,7 @@ function routeLabel(r) {
   const frag = document.createDocumentFragment();
   frag.append(r.from || CURRENT_LOCATION);
   frag.append(el('span', 'arrow', '→'), r.to);
-  if (r.via) frag.append(el('small', '', `${r.via} 経由`));
+  if (r.via) frag.append(el('small', '', `${splitVia(r.via).join('・')} 経由`));
   return frag;
 }
 
@@ -1134,13 +1183,7 @@ function fillRoute(r) {
   fromEl.value = r.from || '';
   toEl.value = r.to || '';
   fromCoords = null;
-  if (r.via) {
-    $('viaRow').hidden = false;
-    viaEl.value = r.via;
-  } else {
-    $('viaRow').hidden = true;
-    viaEl.value = '';
-  }
+  setVias(splitVia(r.via));
 }
 
 function fillForm(q) {
@@ -1189,8 +1232,10 @@ function renderLists() {
   // 入力候補：お気に入りと履歴に出てきた駅名
   const names = new Set();
   favorites.concat(recent).forEach((r) => {
-    [r.from, r.to, r.via].forEach((n) => { if (n && n !== CURRENT_LOCATION) names.add(n); });
+    [r.from, r.to, ...splitVia(r.via)].forEach((n) => { if (n && n !== CURRENT_LOCATION) names.add(n); });
   });
+  // 検索結果に出てきた駅名（「金山(愛知県)」など、そのまま検索に使える正式な名前）
+  store.get('seenStations', []).forEach((n) => names.add(n));
   const dl = $('stationList');
   dl.textContent = '';
   names.forEach((n) => {
@@ -1340,7 +1385,7 @@ function queryFromUrl() {
     q: {
       from: (p.get('from') || '').trim(),
       to: p.get('to').trim(),
-      via: (p.get('via') || '').trim(),
+      via: p.getAll('via').flatMap(splitVia).slice(0, MAX_VIA).join(VIA_SEP),
       type: TYPE_LABEL[p.get('type')] ? p.get('type') : 'dep',
       when: { y, mo, d, h, mi },
       coords: null,
@@ -1392,11 +1437,17 @@ function init() {
     fromEl.value = toEl.value;
     toEl.value = a === CURRENT_LOCATION ? '' : a;
     fromCoords = null;
+    setVias(viaInputs().map((i) => i.value).reverse()); // 経由の順番も逆に
   });
   $('nowBtn').addEventListener('click', () => { setNow(); setType('dep'); });
   $('locBtn').addEventListener('click', useCurrentLocation);
-  $('viaBtn').addEventListener('click', () => { $('viaRow').hidden = false; viaEl.focus(); });
-  $('viaClose').addEventListener('click', () => { $('viaRow').hidden = true; viaEl.value = ''; });
+  $('viaBtn').addEventListener('click', () => {
+    const vias = viaInputs().map((i) => i.value);
+    if (vias.length >= MAX_VIA) return;
+    setVias([...vias, '']);
+    const inputs = viaInputs();
+    inputs[inputs.length - 1].focus();
+  });
 
   $('addFavBtn').addEventListener('click', () => {
     const q = currentQuery();

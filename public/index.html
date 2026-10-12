@@ -31,11 +31,7 @@
           <input id="from" name="from" type="text" placeholder="出発駅" list="stationList" enterkeyhint="next">
           <button type="button" id="locBtn" class="chip" aria-label="現在地から">📍現在地</button>
         </div>
-        <div class="station-row via-row" id="viaRow" hidden>
-          <span class="dot via" aria-hidden="true"></span>
-          <input id="via" name="via" type="text" placeholder="経由駅" list="stationList" enterkeyhint="next">
-          <button type="button" id="viaClose" class="chip" aria-label="経由を削除">✕</button>
-        </div>
+        <div id="viaList"></div>
         <div class="station-row">
           <span class="dot to" aria-hidden="true"></span>
           <input id="to" name="to" type="text" placeholder="到着駅" list="stationList" enterkeyhint="search">
