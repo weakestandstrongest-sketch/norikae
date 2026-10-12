@@ -624,18 +624,18 @@ async function buildTrainRoute(d, row) {
   try {
     const t = row.train;
     const res = await fetch('api/train?' + query({
-      code: d.st.code, group: d.tt.groupId, train: t.trainId, kind: d.tt.kind,
+      code: d.st.code, group: d.tt.groupId, train: t.trainId, kind: d.tt.kind || '',
       hh: Math.floor(t.min / 60), mm: t.min % 60,
     }));
-    const data = await res.json().catch(() => ({}));
+    const data = await res.json().catch(() => ({ error: `列車の情報を取得できませんでした（${res.status}）` }));
     if (dia !== d) return;
-    if (!res.ok || !data.stops || !data.stops.length) throw Object.assign(new Error(data.error || 'no stops'), { detail: data });
+    if (!res.ok || !data.stops || !data.stops.length) throw Object.assign(new Error(data.error || '停車駅が分かりませんでした'), { detail: data });
 
     const stops = data.stops;
     let here = stops.findIndex((s) => normText(s.name) === normText(d.st.name));
     if (here < 0) here = stops.findIndex((s) => s.dep === t.time);
     const later = stops.slice(here + 1);
-    if (!later.length) throw new Error('no later stops');
+    if (!later.length) throw Object.assign(new Error('この駅より先の停車駅が分かりませんでした'), { detail: { stops } });
 
     // 乗り換え候補：Yahoo の検索結果に出てきた駅と、この電車の終点（なければ全部の停車駅）
     const known = new Set((row.searchRoutes || []).flatMap((r) => r.steps.filter((s) => s.kind === 'station').map((s) => normText(s.name))));
@@ -668,7 +668,7 @@ async function buildTrainRoute(d, row) {
       x.k = k;
       if (!pick || x.arr < pick.arr || (+x.arr === +pick.arr && (x.transfers < pick.transfers || (x.transfers === pick.transfers && k > pick.k)))) pick = x;
     });
-    if (!pick) throw new Error('no continuation');
+    if (!pick) throw Object.assign(new Error('乗り換え先の経路が見つかりませんでした'), { detail: { stops, cands: cands.map((c) => c.name) } });
 
     const S = pick.S;
     const nStops = stops.indexOf(S) - Math.max(here, 0);
@@ -710,14 +710,35 @@ async function buildTrainRoute(d, row) {
   } catch (e) {
     row.building = false;
     if (dia !== d) return;
+    // 失敗の理由は一覧の中に出す（画面下の通知はダイヤの画面に隠れて見えないため）
+    row.error = {
+      message: e.message || 'エラー',
+      report: JSON.stringify({ error: e.message, train: row.train, station: d.st, group: d.tt.groupId, kind: d.tt.kind, detail: e.detail || null }),
+    };
     renderDia();
-    const detail = e.detail && e.detail.outline;
-    if (detail && navigator.clipboard && confirm('この電車を使う経路を作れませんでした。原因を調べるためのデータをコピーしますか？（チャットに貼り付けて送ってください）')) {
-      navigator.clipboard.writeText(JSON.stringify({ path: e.detail.path, outline: detail })).then(() => toast('コピーしました'), () => {});
-    } else {
-      toast('この電車を使う経路を作れませんでした');
-    }
   }
+}
+
+// 調査用データをコピーするボタン（コピーできない環境では文字を選択できるように表示）
+function reportButton(text) {
+  const wrap = el('div', 'dia-report');
+  const b = el('button', 'chip', '原因を調べるデータをコピー（チャットに貼って送ってください）');
+  b.type = 'button';
+  b.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      b.textContent = 'コピーしました。チャットに貼り付けて送ってください';
+    } catch (e) {
+      const ta = el('textarea', 'dia-report-text');
+      ta.value = text;
+      ta.readOnly = true;
+      wrap.append(ta);
+      ta.select();
+      b.remove();
+    }
+  });
+  wrap.append(b);
+  return wrap;
 }
 
 function renderTimetableDia(d, list) {
@@ -767,12 +788,15 @@ function renderTimetableDia(d, list) {
     }
     if (isCurrent) btn.append(el('div', 'dia-current', '表示中の電車'));
     if (r.building) btn.append(el('div', 'dia-current', 'この電車の経路を作っています…'));
+    if (r.error && !r.building) btn.append(el('div', 'dia-error', `経路を作れませんでした：${r.error.message}`));
     btn.addEventListener('click', () => {
       if (r.state !== 'done') { toast('検索中です'); return; }
       if (r.exact) { chooseDia({ route: r.route }); return; }
+      r.error = null;
       buildTrainRoute(d, r);
     });
     list.append(btn);
+    if (r.error && !r.building) list.append(reportButton(r.error.report));
   }
 
   if (!rows.length) list.append(el('p', 'empty', 'この時間帯の電車はありません'));

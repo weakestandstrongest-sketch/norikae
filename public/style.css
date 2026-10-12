@@ -436,3 +436,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 }
 .nearby .chip.selected { background: var(--accent); color: var(--accent-text); }
 .dia-times b.estimate { color: var(--sub); }
+.dia-error { font-size: 12px; color: #f87171; margin-top: 4px; }
+.dia-report { padding: 0 16px 12px; border-bottom: 1px solid var(--line); }
+.dia-report .chip { white-space: normal; text-align: left; line-height: 1.4; }
+.dia-report-text { width: 100%; height: 120px; margin-top: 8px; font-size: 11px; background: var(--field); color: var(--text); border: none; border-radius: 8px; }

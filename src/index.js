@@ -79,7 +79,7 @@ async function handleTimetable(request, env, ctx) {
   const destination = (p.get('dest') || '').slice(0, 40);
 
   const cache = caches.default;
-  const cacheKey = new Request(`https://cache.norikae/timetable?${new URLSearchParams({ code, date, time, line, destination })}`);
+  const cacheKey = new Request(`https://cache.norikae/timetable-v2?${new URLSearchParams({ code, date, time, line, destination })}`);
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
 
@@ -106,10 +106,12 @@ async function handleTimetable(request, env, ctx) {
 // 列車ごとの停車駅と時刻（前後のダイヤで、その電車を使う経路を作るため）
 async function handleTrain(request, env, ctx) {
   const p = new URL(request.url).searchParams;
-  const ids = ['code', 'group', 'train', 'kind', 'hh', 'mm'].map((k) => p.get(k) || '');
-  if (!ids.every((v) => /^\d{1,9}$/.test(v))) return json({ error: 'パラメータが正しくありません' }, 400);
-  const [code, group, train, kind, hh, mm] = ids;
-  const path = `/timetable/${code}/${group}/${train}?kind=${kind}&hh=${Number(hh)}&mm=${Number(mm)}`;
+  const ids = ['code', 'group', 'train', 'hh', 'mm'].map((k) => p.get(k) || '');
+  const kind = p.get('kind') || '';
+  if (!ids.every((v) => /^\d{1,9}$/.test(v)) || !/^\d{0,2}$/.test(kind)) return json({ error: 'パラメータが正しくありません' }, 400);
+  const [code, group, train, hh, mm] = ids;
+  // kind（平日・土曜・休日）が分からないときは付けない
+  const path = `/timetable/${code}/${group}/${train}?${kind ? `kind=${kind}&` : ''}hh=${Number(hh)}&mm=${Number(mm)}`;
 
   const cache = caches.default;
   const cacheKey = new Request(`https://cache.norikae/train${path}`);

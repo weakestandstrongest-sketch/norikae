@@ -66,7 +66,7 @@ export function findStops(root) {
 
 // JSON が読めなかったときに、原因を調べるための形の要約（キーと値の型だけ）
 export function outline(o, depth = 0) {
-  if (depth > 4) return '…';
+  if (depth > 8) return '…';
   if (Array.isArray(o)) return o.length ? [outline(o[0], depth + 1), `×${o.length}`] : [];
   if (o && typeof o === 'object') {
     return Object.fromEntries(Object.entries(o).slice(0, 40).map(([k, v]) => [k, outline(v, depth + 1)]));
