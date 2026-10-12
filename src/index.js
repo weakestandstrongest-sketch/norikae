@@ -64,11 +64,32 @@ async function handleNearest(request) {
   return json(body);
 }
 
+// 調査用：Yahoo!乗換案内のページをそのまま返す（ページ構成の確認に使う）
+// 取りに行けるのは検索結果・駅・時刻表のページだけ
+async function handleDebugYahoo(request, env) {
+  const path = new URL(request.url).searchParams.get('path') || '';
+  if (!/^\/(search|station|timetable)\/[\w\-./?=&%+,:;~]*$/.test(path)) {
+    return json({ error: 'このページは取得できません' }, 400);
+  }
+  try {
+    const res = await fetch((env.UPSTREAM || YAHOO_ORIGIN) + path, {
+      headers: { 'user-agent': UA, 'accept-language': 'ja' },
+    });
+    return new Response(await res.text(), {
+      status: 200,
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'x-upstream-status': String(res.status) },
+    });
+  } catch (e) {
+    return json({ error: 'Yahoo!乗換案内に接続できませんでした' }, 502);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/api/search') return handleSearch(request, env, ctx);
     if (url.pathname === '/api/nearest') return handleNearest(request);
+    if (url.pathname === '/api/debug/yahoo') return handleDebugYahoo(request, env);
     if (url.pathname === '/api/health') return json({ ok: true });
     // それ以外は public/ の静的ファイル
     return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
