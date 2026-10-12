@@ -435,3 +435,4 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   background: var(--field);
 }
 .nearby .chip.selected { background: var(--accent); color: var(--accent-text); }
+.dia-times b.estimate { color: var(--sub); }

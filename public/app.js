@@ -219,9 +219,9 @@ function renderResultHead(q) {
   $('openGoogle').href = buildUrl('google', q);
 }
 
-async function fetchRoutes(q) {
+async function fetchRoutes(q, page) {
   try {
-    const res = await fetch('api/search?' + query(yahooParams(q)));
+    const res = await fetch('api/search?' + query({ ...yahooParams(q), page }));
     return await res.json();
   } catch (e) {
     return { error: '通信できませんでした。電波の良いところで再度お試しください', routes: [] };
@@ -272,6 +272,33 @@ async function showResults(q, push, opts = {}) {
   }
   shownRoutes = data.routes;
   data.routes.forEach((r, i) => list.append(renderRoute(r, i, i === 0)));
+  if (data.total > data.routes.length) list.append(moreRoutesButton(q, seq, 2, data.total));
+}
+
+// Yahoo は 1 ページに 3 ルート。「ほかのルート」で 4 件目以降を読み足す
+function moreRoutesButton(q, seq, page, total) {
+  const b = el('button', 'dia-more more-routes', `ほかのルートを表示（${(page - 1) * 3 + 1}〜${Math.min(page * 3, total)}件目）`);
+  b.type = 'button';
+  b.addEventListener('click', async () => {
+    b.disabled = true;
+    b.textContent = '読み込み中…';
+    const data = await fetchRoutes(q, page);
+    if (seq !== searchSeq) return;
+    const routes = (data.routes || []).filter((r) => !shownRoutes.some((s) =>
+      s.summary.dep === r.summary.dep && s.summary.arr === r.summary.arr && s.steps.length === r.steps.length));
+    if (!routes.length) { b.remove(); toast('ほかのルートはありませんでした'); return; }
+    const list = $('resultList');
+    routes.forEach((r) => {
+      shownRoutes.push(r);
+      list.insertBefore(renderRoute(r, shownRoutes.length - 1, false), b);
+    });
+    if (page < 3 && total > page * 3) {
+      b.replaceWith(moreRoutesButton(q, seq, page + 1, total));
+    } else {
+      b.remove();
+    }
+  });
+  return b;
 }
 
 function renderRoute(route, index, expanded) {
@@ -356,6 +383,7 @@ function renderSteps(steps, routeIndex) {
 // 地図アプリで使える地名（駅は「〇〇駅」にする。「赤池(愛知県)」の括弧は外す）
 function placeForMap(st) {
   if (!st || !st.name) return '';
+  if (st.name.includes('/')) return `${st.name.split('/')[0]} バス停`;
   if (!st.isStation) return st.name;
   const n = st.name.replace(/[（(][^)）]*[)）]/g, '').trim();
   return n.endsWith('駅') ? n : n + '駅';
@@ -434,9 +462,199 @@ function openDia(routeIndex, stepIndex) {
   $('diaNote').textContent = stepIndex === 0
     ? '時刻によって前後のルートが変わることがあります。選ぶとそのルートに切り替わります。'
     : `${st.name}に${st.arr}着として、そこから先の電車を選べます。${dia.originName}からの全体の時刻も表示します。`;
+  // 乗る電車の駅コードが分かれば、駅の時刻表から全部の電車を出す
+  const next = route.steps[stepIndex + 1];
+  if (st.code && next && next.kind === 'access' && !next.walk) {
+    dia.mode = 'timetable';
+    dia.train = next;
+    renderDia();
+    $('diaDlg').showModal();
+    startTimetableDia(dia);
+    return;
+  }
+  dia.mode = 'chain';
   renderDia();
   $('diaDlg').showModal();
   loadDiaLater(5, +stDep + 60 * MIN_MS);
+}
+
+// ---------- 前後のダイヤ（駅の時刻表から） ----------
+// 時刻表の全列車を並べ、1 本ずつ「その電車でその時刻に出たら何時に着くか」を検索する。
+
+const ttDateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+async function startTimetableDia(d) {
+  // 深夜 0〜3 時台は前日の時刻表（24 時台）に載っている
+  const service = new Date(d.stDep);
+  if (service.getHours() < 4) service.setDate(service.getDate() - 1);
+  service.setHours(0, 0, 0, 0);
+  d.serviceDay = service;
+  d.stMin = Math.round((d.stDep - service) / MIN_MS);
+  d.loading = true;
+  renderDia();
+  try {
+    const res = await fetch('api/timetable?' + query({
+      code: d.st.code,
+      date: ttDateStr(service),
+      time: d.st.dep,
+      line: d.train.line,
+      dest: d.train.destination,
+    }));
+    const data = await res.json();
+    if (dia !== d) return;
+    if (!res.ok || !data.trains || !data.trains.length) throw new Error(data.error || 'no timetable');
+    d.tt = data;
+    d.rows = new Map();
+    d.from = d.stMin - 30;
+    d.to = d.stMin + 60;
+    d.loading = false;
+    fillTimetableRows(d);
+  } catch (e) {
+    if (dia !== d) return;
+    // 時刻表が使えないときは、検索結果をつなげる方法に切り替える
+    d.mode = 'chain';
+    d.loading = false;
+    loadDiaLater(5, +d.stDep + 60 * MIN_MS);
+  }
+}
+
+// 表示範囲の列車を行にして、到着時刻を検索する
+function fillTimetableRows(d) {
+  for (const t of d.tt.trains) {
+    if (t.min < d.from || t.min > d.to) continue;
+    const key = `${t.trainId}|${t.min}`;
+    if (d.rows.has(key)) continue;
+    const dep = new Date(+d.serviceDay + t.min * MIN_MS);
+    const row = { train: t, dep, state: 'pending', route: null, arr: null, exact: false };
+    // 乗換駅に着く前に出てしまう電車は検索しない
+    if (d.stArr && dep < d.stArr) row.state = 'tooEarly';
+    d.rows.set(key, row);
+  }
+  renderDia();
+  runTimetableSearches(d);
+}
+
+// 今の電車に近いものから順に、3 本ずつ並行して検索
+async function runTimetableSearches(d) {
+  if (d.searching) return;
+  d.searching = true;
+  const next = () => [...d.rows.values()]
+    .filter((r) => r.state === 'pending')
+    .sort((a, b) => Math.abs(a.dep - d.stDep) - Math.abs(b.dep - d.stDep))[0];
+  const worker = async () => {
+    for (let row = next(); row && dia === d; row = next()) {
+      row.state = 'loading';
+      const data = await fetchRoutes({ ...d.q, type: 'dep', when: dateToWhen(row.dep) });
+      if (dia !== d) return;
+      resolveTimetableRow(d, row, (data && data.routes) || []);
+      renderDia();
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  d.searching = false;
+}
+
+const normText = (s) => (s || '').normalize('NFKC').replace(/\s+/g, '').replace(/[(（][^)）]*[)）]/g, '');
+
+// 検索結果の中から「この電車で出発するルート」を探す。なければ最短の到着を目安にする
+function resolveTimetableRow(d, row, routes) {
+  const t = row.train;
+  const dest = normText(t.destination);
+  const exact = routes.find((r) => {
+    const first = r.steps[0];
+    const a = r.steps.find((s) => s.kind === 'access');
+    if (!first || first.dep !== t.time || !a || a.walk) return false;
+    const line = normText(a.line);
+    const kindOk = !t.kind || line.endsWith(normText(t.kind)) || (t.kind === '普通' && !/(急|快|特|準)/.test(line.slice(-4)));
+    const destOk = !dest || normText(a.destination).startsWith(dest);
+    return kindOk && destOk;
+  });
+  const arrOf = (r) => {
+    let a = TimeShift.nearDate(r.summary.arr, row.dep);
+    if (a && a < row.dep) a = new Date(+a + 24 * 3600e3);
+    return a;
+  };
+  if (exact) {
+    row.route = exact;
+    row.arr = arrOf(exact);
+    row.exact = true;
+  } else {
+    // この電車の時刻以降に出るルートのうち、最も早く着くもの
+    const arrs = routes
+      .filter((r) => { const dep = TimeShift.nearDate(r.summary.dep, row.dep); return dep && dep >= row.dep; })
+      .map(arrOf).filter(Boolean);
+    row.arr = arrs.length ? new Date(Math.min(...arrs)) : null;
+  }
+  row.state = 'done';
+}
+
+function renderTimetableDia(d, list) {
+  const pad2 = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  const earlier = el('button', 'dia-more', '▲ さらに前を表示');
+  earlier.type = 'button';
+  earlier.addEventListener('click', () => { d.from -= 60; fillTimetableRows(d); });
+  list.append(earlier);
+
+  const rows = [...d.rows.values()].sort((a, b) => a.dep - b.dep);
+  let currentRow = null;
+  for (const r of rows) {
+    const t = r.train;
+    const btn = el('button', 'dia-row');
+    btn.type = 'button';
+    const isCurrent = !currentRow && t.time === d.st.dep && d.tt.matchedIndex >= 0 && d.tt.trains[d.tt.matchedIndex].trainId === t.trainId;
+    if (isCurrent) { btn.classList.add('current'); currentRow = btn; }
+    if (r.state === 'tooEarly') btn.disabled = true;
+
+    const times = el('div', 'dia-times');
+    times.append(el('b', '', t.time), el('span', 'dia-arrow', '→'));
+    if (r.state === 'done' && r.arr) {
+      times.append(el('b', r.exact ? '' : 'estimate', pad2(r.arr)));
+      const meta = [`(${TimeShift.formatMinutes((r.arr - r.dep) / MIN_MS)})`];
+      if (r.exact && r.route.summary.transfers != null) meta.push(`乗換${r.route.summary.transfers}回`);
+      times.append(el('small', '', meta.join(' ')));
+    } else if (r.state === 'tooEarly') {
+      times.append(el('small', '', '－'));
+    } else if (r.state === 'done') {
+      times.append(el('small', '', '経路なし'));
+    } else {
+      times.append(el('small', '', '検索中…'));
+    }
+    btn.append(times);
+
+    btn.append(el('div', 'dia-line', `${d.tt.railName}${t.kind && t.kind !== '普通' ? t.kind : ''}・${t.destination}行`));
+    const sub = [t.cars && `${t.cars}両`, t.track && `${t.track}番線発`].filter(Boolean).join('　');
+    if (sub) btn.append(el('div', 'dia-sub', sub));
+
+    if (r.state === 'tooEarly') {
+      btn.append(el('div', 'dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`));
+    } else if (r.state === 'done' && r.arr && !r.exact) {
+      btn.append(el('div', 'dia-note-row', '到着は目安（途中で後の電車に乗り換えた場合）'));
+    } else if (r.state === 'done' && r.arr && d.stepIndex > 0) {
+      btn.append(el('div', 'dia-total',
+        `全体：${d.originName} ${d.route.summary.dep}発 → ${pad2(r.arr)}着（${TimeShift.formatMinutes((r.arr - d.originDep) / MIN_MS)}）`));
+    }
+    if (isCurrent) btn.append(el('div', 'dia-current', '表示中の電車'));
+    btn.addEventListener('click', () => {
+      if (r.state !== 'done' || !r.exact) {
+        toast(r.state === 'done' ? 'この電車を使う経路は見つかりませんでした' : '検索中です');
+        return;
+      }
+      chooseDia({ route: r.route });
+    });
+    list.append(btn);
+  }
+
+  if (!rows.length) list.append(el('p', 'empty', 'この時間帯の電車はありません'));
+
+  const later = el('button', 'dia-more', '▼ さらに後を表示');
+  later.type = 'button';
+  later.addEventListener('click', () => { d.to += 60; fillTimetableRows(d); });
+  list.append(later);
+
+  if (currentRow && !d.scrolled) {
+    d.scrolled = true;
+    currentRow.scrollIntoView({ block: 'center' });
+  }
 }
 
 function addDiaEntries(d, routes, t) {
@@ -498,6 +716,11 @@ function renderDia() {
   const list = $('diaList');
   list.textContent = '';
   if (!d) return;
+  if (d.mode === 'timetable') {
+    if (d.loading || !d.rows) list.append(el('p', 'loading', '時刻表を読み込み中…'));
+    else renderTimetableDia(d, list);
+    return;
+  }
   const pad2 = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 
   const earlier = el('button', 'dia-more', d.loading ? '読み込み中…' : '▲ さらに前を表示');

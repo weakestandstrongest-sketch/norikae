@@ -1,5 +1,6 @@
 import { buildSearchUrl, parseResult, InputError, YAHOO_ORIGIN } from './yahoo.js';
 import { parseCoords, findNearest, findAddress } from './nearest.js';
+import { lookupTimetable } from './timetable.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 
@@ -40,9 +41,9 @@ async function handleSearch(request, env, ctx) {
     return json({ error: `Yahoo!乗換案内がエラーを返しました（${res.status}）`, yahooUrl: publicUrl }, 502);
   }
 
-  const { routes } = parseResult(await res.text());
+  const { routes, total } = parseResult(await res.text());
   const body = routes.length
-    ? { routes, yahooUrl: publicUrl }
+    ? { routes, total: total || routes.length, yahooUrl: publicUrl }
     : { routes, yahooUrl: publicUrl, error: '経路が見つかりませんでした。駅名を確認するか、Yahoo で直接開いてください' };
   const out = json(body, 200, { 'cache-control': 'public, max-age=60' });
   if (routes.length) ctx.waitUntil(cache.put(cacheKey, out.clone()));
@@ -64,24 +65,41 @@ async function handleNearest(request) {
   return json(body);
 }
 
-// 調査用：Yahoo!乗換案内のページをそのまま返す（ページ構成の確認に使う）
-// 取りに行けるのは検索結果・駅・時刻表のページだけ
-async function handleDebugYahoo(request, env) {
-  const path = new URL(request.url).searchParams.get('path') || '';
-  if (!/^\/(search|station|timetable)\/[\w\-./?=&%+,:;~]*$/.test(path)) {
-    return json({ error: 'このページは取得できません' }, 400);
+// 駅の時刻表（前後のダイヤで全部の電車を出すため）
+async function handleTimetable(request, env, ctx) {
+  const p = new URL(request.url).searchParams;
+  const code = p.get('code') || '';
+  const date = p.get('date') || '';
+  const time = p.get('time') || '';
+  if (!/^\d{3,8}$/.test(code) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+    return json({ error: 'パラメータが正しくありません' }, 400);
   }
-  try {
+  const line = (p.get('line') || '').slice(0, 60);
+  const destination = (p.get('dest') || '').slice(0, 40);
+
+  const cache = caches.default;
+  const cacheKey = new Request(`https://cache.norikae/timetable?${new URLSearchParams({ code, date, time, line, destination })}`);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const fetchPage = async (path) => {
     const res = await fetch((env.UPSTREAM || YAHOO_ORIGIN) + path, {
       headers: { 'user-agent': UA, 'accept-language': 'ja' },
+      cf: { cacheTtl: 3600, cacheEverything: true },
     });
-    return new Response(await res.text(), {
-      status: 200,
-      headers: { 'content-type': 'text/plain; charset=utf-8', 'x-upstream-status': String(res.status) },
-    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  };
+  let result;
+  try {
+    result = await lookupTimetable({ code, date, time, line, destination }, fetchPage);
   } catch (e) {
-    return json({ error: 'Yahoo!乗換案内に接続できませんでした' }, 502);
+    return json({ error: '時刻表を取得できませんでした' }, 502);
   }
+  if (!result) return json({ error: 'この駅の時刻表は見つかりませんでした' }, 404);
+  const out = json(result, 200, { 'cache-control': 'public, max-age=3600' });
+  ctx.waitUntil(cache.put(cacheKey, out.clone()));
+  return out;
 }
 
 export default {
@@ -89,7 +107,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/api/search') return handleSearch(request, env, ctx);
     if (url.pathname === '/api/nearest') return handleNearest(request);
-    if (url.pathname === '/api/debug/yahoo') return handleDebugYahoo(request, env);
+    if (url.pathname === '/api/timetable') return handleTimetable(request, env, ctx);
     if (url.pathname === '/api/health') return json({ ok: true });
     // それ以外は public/ の静的ファイル
     return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });

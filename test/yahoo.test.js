@@ -90,3 +90,41 @@ test('徒歩区間の出口の情報', () => {
   assert.equal(walk.exit, '16番');
   assert.equal(walk.platform, '出口：16番');
 });
+
+import { searchResult } from './nextdata.js';
+
+test('埋め込み JSON（__NEXT_DATA__）から経路を読む', () => {
+  const r = parseResult(searchResult);
+  assert.equal(r.total, 5);
+  const route = r.routes[0];
+  assert.deepEqual(route.summary, {
+    dep: '08:05', arr: '09:02', duration: '57分(乗車45分)', transfers: 1, fare: 1230, fareNote: '',
+    distance: '40.2km', tags: ['早', '安'], alert: true,
+  });
+  const s = route.steps;
+  assert.deepEqual(s.map((x) => x.kind), ['station', 'access', 'station', 'access', 'station', 'access', 'station']);
+  assert.deepEqual(s[0], { kind: 'station', name: '青葉台', arr: '', dep: '08:05', isStation: true, code: '100' });
+  assert.equal(s[1].line, '架空本線快速');
+  assert.equal(s[1].destination, '港町行');
+  assert.equal(s[1].platform, '[発] 3番線 → [着] 1番線');
+  assert.equal(s[1].stops, '3駅');
+  assert.equal(s[1].color, '#e91a4c');
+  assert.deepEqual([s[2].arr, s[2].dep], ['08:30', '08:33']);
+  assert.equal(s[3].walk, true);
+  assert.equal(s[3].line, '徒歩4分');
+  assert.equal(s[3].platform, '出口：北口');
+  assert.equal(s[4].isStation, false);
+  assert.equal(s[5].platform, '[発] 5のりば');
+  assert.equal(s[5].alert, true);
+  assert.equal(s[5].alertText, '遅れ');
+  // 終点は到着時刻
+  assert.deepEqual([s[6].arr, s[6].dep], ['09:02', '']);
+});
+
+test('2 ページ目は fl=4&tl=6', () => {
+  const u = new URL(buildSearchUrl(new URLSearchParams('from=a&to=b&date=2026-10-12&time=9:05&page=2')));
+  assert.equal(u.searchParams.get('fl'), '4');
+  assert.equal(u.searchParams.get('tl'), '6');
+  const u1 = new URL(buildSearchUrl(new URLSearchParams('from=a&to=b&date=2026-10-12&time=9:05&page=9')));
+  assert.equal(u1.searchParams.get('fl'), null);
+});
