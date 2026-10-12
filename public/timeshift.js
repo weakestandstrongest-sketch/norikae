@@ -106,33 +106,65 @@ const TimeShift = (() => {
     if (!(min >= 0)) return '';
     const h = Math.floor(min / 60);
     const m = Math.round(min % 60);
-    return h ? `${h}時間${m}分` : `${m}分`;
+    if (!h) return `${m}分`;
+    return m ? `${h}時間${m}分` : `${h}時間`;
   }
 
   const transfersOf = (steps) => Math.max(0, steps.filter((s) => s.kind === 'access' && !s.walk).length - 1);
 
+  // "HH:MM" を分単位でずらす
+  function shiftTime(hhmm, minutes) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || '');
+    if (!m) return hhmm;
+    const t = (((Number(m[1]) * 60 + Number(m[2]) + minutes) % 1440) + 1440) % 1440;
+    return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  }
+
+  // "HH:MM" a から b まで何分か（日付またぎを考えて -12〜+12 時間）
+  function diffMinutes(a, b) {
+    const da = nearDate(a, new Date(2000, 0, 1, 12));
+    const db = da && nearDate(b, da);
+    return da && db ? Math.round((db - da) / MIN) : 0;
+  }
+
   /**
-   * route の stepIndex 番目の駅から先を、別の検索結果 tail に差し替えた「出発駅からの全体ルート」を作る。
+   * stepIndex 番目の駅より前が徒歩だけか（＝最初に乗る駅か）。
+   * そうなら、乗る電車に合わせて家などを出る時刻もずらせる。
+   */
+  function isWalkOnlyBefore(route, stepIndex) {
+    return stepIndex > 0 && route.steps.slice(0, stepIndex).every((s) => s.kind === 'station' || s.walk);
+  }
+
+  /**
+   * route の stepIndex 番目の駅から先を、別の検索結果 tail に差し替えた「出発地からの全体ルート」を作る。
    * stepIndex が 0 なら tail そのもの。
+   * その駅より前が徒歩だけなら、出発地を出る時刻も電車に合わせてずらす。
    */
   function combineRoute(route, stepIndex, tail) {
     if (stepIndex === 0) return tail;
-    const prefix = route.steps.slice(0, stepIndex + 1).map((s) => ({ ...s }));
+    const walkOnly = isWalkOnlyBefore(route, stepIndex);
+    const newDep = (tail.steps[0] && tail.steps[0].dep) || tail.summary.dep;
+    const offset = walkOnly ? diffMinutes(route.steps[stepIndex].dep, newDep) : 0;
+    const prefix = route.steps.slice(0, stepIndex + 1).map((s) => (s.kind === 'station'
+      ? { ...s, arr: s.arr && shiftTime(s.arr, offset), dep: s.dep && shiftTime(s.dep, offset) }
+      : { ...s }));
     const station = prefix[prefix.length - 1];
-    station.dep = (tail.steps[0] && tail.steps[0].dep) || tail.summary.dep;
+    station.dep = newDep;
     const steps = prefix.concat(tail.steps.slice(1));
 
-    const depDate = nearDate(route.summary.dep, nearDate(station.dep, new Date(2000, 0, 1, 12)));
+    const originDep = shiftTime(route.summary.dep, offset);
+    const depDate = nearDate(originDep, nearDate(station.dep, new Date(2000, 0, 1, 12)));
     const stDep = nearDate(station.dep, depDate);
     let arrDate = nearDate(tail.summary.arr, stDep);
     if (arrDate < stDep) arrDate = new Date(+arrDate + 24 * 3600e3);
     return {
       summary: {
-        dep: route.summary.dep,
+        dep: originDep,
         arr: tail.summary.arr,
         duration: formatMinutes((arrDate - depDate) / MIN),
         transfers: transfersOf(steps),
-        fare: null, // 乗り継ぎを変えた場合の運賃は分からないので出さない
+        // 徒歩のあとに乗るだけなら運賃は差し替え先と同じ。乗り継ぎを変えた場合は分からないので出さない
+        fare: walkOnly ? tail.summary.fare : null,
         fareNote: '',
         distance: '',
         tags: [],
@@ -143,5 +175,5 @@ const TimeShift = (() => {
     };
   }
 
-  return { plan, resolve, chainNext, combineRoute, formatMinutes, nearDate, anchorFor };
+  return { plan, resolve, chainNext, combineRoute, isWalkOnlyBefore, shiftTime, formatMinutes, nearDate, anchorFor };
 })();

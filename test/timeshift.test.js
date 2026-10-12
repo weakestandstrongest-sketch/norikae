@@ -123,5 +123,39 @@ test('乗換駅から先を差し替えても、出発駅からの全体ルー�
 test('所要時間の表示', () => {
   assert.equal(formatMinutes(26), '26分');
   assert.equal(formatMinutes(77), '1時間17分');
+  assert.equal(formatMinutes(120), '2時間');
   assert.equal(formatMinutes(NaN), '');
+});
+
+test('最初に乗る駅（前が徒歩だけ）なら、出発地を出る時刻も電車に合わせてずらす', () => {
+  const S = (name, arr, dep) => ({ kind: 'station', name, arr, dep });
+  const route = {
+    summary: { dep: '09:54', arr: '11:38', alert: false, fare: 1520 },
+    steps: [S('愛知県知立市栄2丁目', '', '09:54'), { kind: 'access', line: '徒歩4分', walk: true },
+      S('知立', '09:58', '10:01'), { kind: 'access', line: '名鉄名古屋本線快速特急', walk: false }, S('岐大口', '11:38', '')],
+  };
+  assert.equal(ctx.TimeShift.isWalkOnlyBefore(route, 2), true);
+  const tail = {
+    summary: { dep: '09:49', arr: '11:38', alert: false, fare: 1520 },
+    steps: [S('知立', '', '09:49'), { kind: 'access', line: '名鉄名古屋本線', walk: false }, S('岐大口', '11:38', '')],
+  };
+  const c = plain(combineRoute(route, 2, tail));
+  // 10:01 → 09:49 の 12 分前倒し。家を出るのも 12 分早く、知立に着くのも 12 分早い
+  assert.equal(c.summary.dep, '09:42');
+  assert.deepEqual([c.steps[2].arr, c.steps[2].dep], ['09:46', '09:49']);
+  assert.equal(c.steps[0].dep, '09:42');
+  assert.equal(c.summary.duration, '1時間56分');
+  assert.equal(c.summary.fare, 1520);
+});
+
+test('電車から乗り換える駅なら、それより前の時刻は変えない', () => {
+  const S = (name, arr, dep) => ({ kind: 'station', name, arr, dep });
+  const route = {
+    summary: { dep: '09:31', arr: '10:58' },
+    steps: [S('知立', '', '09:31'), { kind: 'access', line: '快速特急', walk: false }, S('名鉄名古屋', '09:52', '09:55'),
+      { kind: 'access', line: '特急', walk: false }, S('名鉄岐阜', '10:24', '')],
+  };
+  assert.equal(ctx.TimeShift.isWalkOnlyBefore(route, 2), false);
+  assert.equal(ctx.TimeShift.isWalkOnlyBefore(route, 0), false);
+  assert.equal(ctx.TimeShift.shiftTime('00:05', -10), '23:55');
 });

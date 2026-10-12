@@ -451,7 +451,9 @@ function openDia(routeIndex, stepIndex) {
     originName: route.steps[0].name,
     originDep,
     stDep,
-    stArr: stepIndex > 0 && st.arr ? TimeShift.nearDate(st.arr, originDep) : null,
+    // 最初に乗る駅（その前が徒歩だけ）なら、家などを出る時刻を電車に合わせてずらせるので制限なし
+    walkOnly: TimeShift.isWalkOnlyBefore(route, stepIndex),
+    stArr: stepIndex > 0 && st.arr && !TimeShift.isWalkOnlyBefore(route, stepIndex) ? TimeShift.nearDate(st.arr, originDep) : null,
     entries: new Map(),
     nextT: new Date(+stDep - 30 * MIN_MS),
     earlierFrom: null,
@@ -461,7 +463,9 @@ function openDia(routeIndex, stepIndex) {
   $('diaRoute').textContent = `${st.name} → ${q.to}`;
   $('diaNote').textContent = stepIndex === 0
     ? '時刻によって前後のルートが変わることがあります。選ぶとそのルートに切り替わります。'
-    : `${st.name}に${st.arr}着として、そこから先の電車を選べます。${dia.originName}からの全体の時刻も表示します。`;
+    : dia.walkOnly
+      ? `${dia.originName}から${st.name}まで歩いて乗る電車を選べます。${dia.originName}を出る時刻も電車に合わせて表示します。`
+      : `${st.name}に${st.arr}着として、そこから先の電車を選べます。${dia.originName}からの全体の時刻も表示します。`;
   // 乗る電車の駅コードが分かれば、駅の時刻表から全部の電車を出す
   const next = route.steps[stepIndex + 1];
   if (st.code && next && next.kind === 'access' && !next.walk) {
@@ -588,6 +592,13 @@ function resolveTimetableRow(d, row, routes) {
   row.state = 'done';
 }
 
+// 「全体：出発地 ◯◯発 → ◯◯着」の文。最初に乗る駅なら出発地を出る時刻も電車に合わせる
+function diaTotalText(d, dep, arr) {
+  const leave = d.walkOnly ? new Date(+d.originDep + (dep - d.stDep)) : d.originDep;
+  const hm = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  return `全体：${d.originName} ${hm(leave)}発 → ${hm(arr)}着（${TimeShift.formatMinutes((arr - leave) / MIN_MS)}）`;
+}
+
 function renderTimetableDia(d, list) {
   const pad2 = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
   const earlier = el('button', 'dia-more', '▲ さらに前を表示');
@@ -631,7 +642,7 @@ function renderTimetableDia(d, list) {
       btn.append(el('div', 'dia-note-row', '到着は目安（途中で後の電車に乗り換えた場合）'));
     } else if (r.state === 'done' && r.arr && d.stepIndex > 0) {
       btn.append(el('div', 'dia-total',
-        `全体：${d.originName} ${d.route.summary.dep}発 → ${pad2(r.arr)}着（${TimeShift.formatMinutes((r.arr - d.originDep) / MIN_MS)}）`));
+        diaTotalText(d, r.dep, r.arr)));
     }
     if (isCurrent) btn.append(el('div', 'dia-current', '表示中の電車'));
     btn.addEventListener('click', () => {
@@ -757,7 +768,7 @@ function renderDia() {
       row.append(el('div', 'dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`));
     } else if (d.stepIndex > 0) {
       row.append(el('div', 'dia-total',
-        `全体：${d.originName} ${d.route.summary.dep}発 → ${pad2(e.arr)}着（${TimeShift.formatMinutes((e.arr - d.originDep) / MIN_MS)}）`));
+        diaTotalText(d, e.dep, e.arr)));
     }
     if (isCurrent) row.append(el('div', 'dia-current', '表示中の電車'));
     row.addEventListener('click', () => chooseDia(e));
