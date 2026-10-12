@@ -647,10 +647,6 @@ async function buildTrainRoute(d, row) {
 const companyOf = (line) => normText(line).replace(/^(JR|名鉄|近鉄|京王|東急|小田急|京急|京成|西武|東武|南海|阪急|阪神|京阪|西鉄|東京メトロ|都営|大阪メトロ).*/, '$1').slice(0, 4);
 const firstTrainLine = (r) => { const a = r.steps.find((s) => s.kind === 'access' && !s.walk); return a ? a.line : ''; };
 
-function trainRouteKey(r) {
-  return r.steps.map((s) => (s.kind === 'station' ? `${s.name}${s.arr}${s.dep}` : s.line)).join('|');
-}
-
 async function buildTrainOptions(d, row) {
   const t = row.train;
   const options = [];
@@ -685,12 +681,22 @@ async function buildTrainOptions(d, row) {
   const later = stops.slice(here + 1);
 
   // 乗り換え候補：検索結果に出てきた駅・終点。少なければ途中の駅も足す
-  const known = new Set([...(row.searchRoutes || []), ...shownRoutes]
-    .flatMap((r) => r.steps.filter((s) => s.kind === 'station').map((s) => normText(s.name))));
+  // 検索結果での駅名（「金山(愛知県)」など）も覚えておき、検索にはそちらを使う
+  // （列車ページは「金山」のように括弧なしのことがあり、そのまま検索すると別の駅になる）
+  const fullName = new Map();
+  for (const r of [...(row.searchRoutes || []), ...shownRoutes]) {
+    for (const st of r.steps) {
+      if (st.kind !== 'station') continue;
+      const k = normText(st.name);
+      if (!fullName.has(k) || st.name.length > fullName.get(k).length) fullName.set(k, st.name);
+    }
+  }
+  const known = new Set(fullName.keys());
+  const nameOf = (S) => fullName.get(normText(S.name)) || S.name;
   const destName = normText(d.q.to);
   let cands = later.filter((s, k) => known.has(normText(s.name)) || normText(s.name) === destName || k === later.length - 1);
   for (const s of later) {
-    if (cands.length >= 5) break;
+    if (cands.length >= 6) break;
     if (!cands.includes(s)) cands.push(s);
   }
   cands = later.filter((s) => cands.includes(s)).slice(0, 8);
@@ -701,6 +707,7 @@ async function buildTrainOptions(d, row) {
     if (atS && atS < row.dep) atS = new Date(+atS + 24 * 3600e3);
     if (!atS) return;
     const nStops = stops.indexOf(S) - Math.max(here, 0);
+    const sName = nameOf(S);
     const legSteps = [
       { kind: 'station', name: d.st.name, arr: '', dep: t.time, isStation: true, code: d.st.code },
       {
@@ -708,21 +715,26 @@ async function buildTrainOptions(d, row) {
         platform: t.track ? `[発] ${t.track}番線` : '', stops: `${nStops}駅`, walk: false, alert: false, alertText: '',
       },
     ];
-    // この電車で S まで乗った場合の運賃（同じ路線の 1 本だけの経路を探す）
-    const legFareP = fetchRoutes({ ...d.q, to: S.name, via: '', type: 'dep', when: dateToWhen(row.dep), coords: null })
+    // この電車で S まで乗った場合の運賃。同じ会社の電車だけを使う経路の運賃を使う
+    // （距離で決まるので、どの電車でも同じ。特急料金のかかる電車は 1 本で行く経路を優先）
+    const company = companyOf(trainLine);
+    const legFareP = fetchRoutes({ ...d.q, to: sName, via: '', type: 'dep', when: dateToWhen(row.dep), coords: null })
       .then((r) => {
-        const one = ((r && r.routes) || []).find((x) => x.summary.transfers === 0 && companyOf(firstTrainLine(x)) === companyOf(trainLine));
+        const routes = (r && r.routes) || [];
+        const sameCo = (x) => x.steps.every((st) => st.kind !== 'access' || st.walk || companyOf(st.line) === company);
+        const one = routes.find((x) => x.summary.transfers === 0 && sameCo(x) && x.summary.fare != null)
+          || routes.find((x) => sameCo(x) && x.summary.fare != null);
         return one ? one.summary.fare : null;
       });
 
     if (normText(S.name) === destName) {
       const legFare = await legFareP;
-      const steps = [...legSteps, { kind: 'station', name: S.name, arr: S.arr || S.dep, dep: '', isStation: true, code: S.code || '' }];
-      add(makeTail(row, steps, atS), legFare, false, S.name);
+      const steps = [...legSteps, { kind: 'station', name: sName, arr: S.arr || S.dep, dep: '', isStation: true, code: S.code || '' }];
+      add(makeTail(row, steps, atS), legFare, false, sName);
       return;
     }
     const [contData, legFare] = await Promise.all([
-      fetchRoutes({ ...d.q, from: S.name, via: '', type: 'dep', when: dateToWhen(atS), coords: null }),
+      fetchRoutes({ ...d.q, from: sName, via: '', type: 'dep', when: dateToWhen(atS), coords: null }),
       legFareP,
     ]);
     for (const c of (contData && contData.routes) || []) {
@@ -731,12 +743,12 @@ async function buildTrainOptions(d, row) {
       if (c.steps[0] && c.steps[0].dep === (S.dep || '') && cLine === normText(trainLine)) continue;
       const steps = [
         ...legSteps,
-        { kind: 'station', name: S.name, arr: S.arr || S.dep, dep: c.steps[0] ? c.steps[0].dep : '', isStation: true, code: S.code || '' },
+        { kind: 'station', name: sName, arr: S.arr || S.dep, dep: c.steps[0] ? c.steps[0].dep : '', isStation: true, code: S.code || '' },
         ...c.steps.slice(1),
       ];
       const fare = legFare != null && c.summary.fare != null ? legFare + c.summary.fare : null;
       const sameCompany = companyOf(cLine) === companyOf(trainLine);
-      add(makeTail(row, steps, null, c), fare, sameCompany, S.name);
+      add(makeTail(row, steps, null, c), fare, sameCompany, sName);
     }
   });
   return rankOptions(options);
@@ -775,13 +787,16 @@ function isSameTrain(r, t) {
 
 // 重複を除いて到着順に並べ、早・安・楽の印を付ける
 function rankOptions(options) {
-  const seen = new Set();
-  const list = options.filter((o) => {
-    const k = trainRouteKey(o.route);
-    if (seen.has(k)) return false;
-    seen.add(k);
-    return true;
-  });
+  // 一覧で同じに見えるもの（乗り換え駅・到着・路線が同じ）は 1 つにまとめる
+  const byLook = new Map();
+  for (const o of options) {
+    const lines = o.route.steps.filter((x) => x.kind === 'access' && !x.walk).map((x) => normText(x.line)).join('>');
+    const k = `${normText(o.via)}|${+o.arr}|${o.transfers}|${lines}`;
+    const prev = byLook.get(k);
+    const better = !prev || (prev.fare == null && o.fare != null) || (o.fare != null && prev.fare != null && o.fare < prev.fare);
+    if (better) byLook.set(k, o);
+  }
+  const list = [...byLook.values()];
   // 到着・運賃・乗換回数のどれも他より良くないもの（意味のない乗り換えなど）は出さない
   const fareOf = (o) => (o.fare == null ? 1e9 : o.fare);
   const kept = list.filter((o) => !list.some((p) => p !== o
