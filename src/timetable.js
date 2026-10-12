@@ -46,6 +46,8 @@ export function parseTimetable(nd) {
   return {
     railName: norm(t.railName),
     direction: norm(t.directionName),
+    // 平日・土曜・休日の区別（列車ごとのページの URL に使う）
+    kind: String(pp.kind || t.driveDayKind || ''),
     trains,
   };
 }
