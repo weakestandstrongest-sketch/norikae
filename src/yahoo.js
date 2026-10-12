@@ -272,6 +272,9 @@ function routeFromFeature(fi) {
       color: access.color ? `#${access.color}` : '',
       platform: clean(platformText(e.ridingPositionInfo)),
       stops: `${stopCount + 1}駅`,
+      // 運賃の区間（"0_1" なら 0 番目の駅から 2 番目の駅まで通しで price 円）
+      fareGroup: (e.priceInfo && e.priceInfo.edgeGroup) || '',
+      farePrice: e.priceInfo ? toNumber(e.priceInfo.price) : null,
       walk: false,
       alert: !!(e.diaInfoStatus && e.diaInfoStatus.length),
       alertText: alertTextOf(e.diaInfoStatus),

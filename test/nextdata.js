@@ -14,6 +14,7 @@ const edge = (o) => ({
   stopStationList: o.stops || [],
   diaInfoStatus: o.alert ? [{ title: o.alert }] : [],
   linkInfo: { station: o.noLink ? null : `/station/${o.code}`, time: `/timetable/${o.code}` },
+  priceInfo: o.fare ? { edgeGroup: o.fare[0], price: o.fare[1] } : { edgeGroup: null, price: '0' },
   accessInfo: o.access === undefined ? null : o.access,
 });
 
@@ -27,7 +28,7 @@ export const searchResult = wrap({
         totalPrice: '1,230', transferCount: '1', isFast: true, isEasy: false, isCheap: true, distance: '40.2km',
       },
       edgeInfoList: [
-        edge({ name: '青葉台', code: '100', rail: '架空本線快速', dest: '港町行', times: [{ time: '08:05', type: 3 }],
+        edge({ name: '青葉台', code: '100', rail: '架空本線快速', dest: '港町行', times: [{ time: '08:05', type: 3 }], fare: ['0_0', '830'],
           pos: { departure: ['3', '番線'], arrival: ['1', '番線'] }, stops: [{ name: 'A' }, { name: 'B' }],
           access: { type: 0, color: 'e91a4c' } }),
         edge({ name: '中央', code: '200', times: [{ time: '08:30', type: 2 }, { time: '08:33', type: 1 }],

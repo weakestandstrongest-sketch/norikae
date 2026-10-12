@@ -650,13 +650,13 @@ const firstTrainLine = (r) => { const a = r.steps.find((s) => s.kind === 'access
 async function buildTrainOptions(d, row) {
   const t = row.train;
   const options = [];
-  const add = (route, fare, fareApprox, via) => {
+  const add = (route, fare, fareApprox, via, sameCompany = false) => {
     let arr = TimeShift.nearDate(route.summary.arr, row.dep);
     if (arr && arr < row.dep) arr = new Date(+arr + 24 * 3600e3);
     if (!arr) return;
     route.summary.fare = fare;
     route.summary.fareNote = fareApprox ? '目安' : '';
-    options.push({ route, arr, fare, fareApprox, transfers: route.summary.transfers == null ? 9 : route.summary.transfers, via });
+    options.push({ route, arr, fare, fareApprox, sameCompany, transfers: route.summary.transfers == null ? 9 : route.summary.transfers, via });
   };
 
   // 1) Yahoo の検索結果にそのままこの電車を使う経路があれば、それも候補に（運賃も正確）
@@ -693,6 +693,7 @@ async function buildTrainOptions(d, row) {
   }
   const known = new Set(fullName.keys());
   const nameOf = (S) => fullName.get(normText(S.name)) || S.name;
+  const fares = addFareSections(new Map(), [...(row.searchRoutes || []), ...shownRoutes]);
   const destName = normText(d.q.to);
   let cands = later.filter((s, k) => known.has(normText(s.name)) || normText(s.name) === destName || k === later.length - 1);
   for (const s of later) {
@@ -718,9 +719,12 @@ async function buildTrainOptions(d, row) {
     // この電車で S まで乗った場合の運賃。同じ会社の電車だけを使う経路の運賃を使う
     // （距離で決まるので、どの電車でも同じ。特急料金のかかる電車は 1 本で行く経路を優先）
     const company = companyOf(trainLine);
-    const legFareP = fetchRoutes({ ...d.q, to: sName, via: '', type: 'dep', when: dateToWhen(row.dep), coords: null })
+    const legKey = `${normText(d.st.name)}>${normText(sName)}`;
+    const legFareP = fares.has(legKey) ? Promise.resolve(fares.get(legKey)) : fetchRoutes({ ...d.q, to: sName, via: '', type: 'dep', when: dateToWhen(row.dep), coords: null })
       .then((r) => {
         const routes = (r && r.routes) || [];
+        addFareSections(fares, routes);
+        if (fares.has(legKey)) return fares.get(legKey);
         const sameCo = (x) => x.steps.every((st) => st.kind !== 'access' || st.walk || companyOf(st.line) === company);
         const one = routes.find((x) => x.summary.transfers === 0 && sameCo(x) && x.summary.fare != null)
           || routes.find((x) => sameCo(x) && x.summary.fare != null);
@@ -748,7 +752,7 @@ async function buildTrainOptions(d, row) {
       ];
       const fare = legFare != null && c.summary.fare != null ? legFare + c.summary.fare : null;
       const sameCompany = companyOf(cLine) === companyOf(trainLine);
-      add(makeTail(row, steps, null, c), fare, sameCompany, sName);
+      add(makeTail(row, steps, null, c), fare, sameCompany, sName, sameCompany);
     }
   });
   return rankOptions(options);
@@ -776,6 +780,22 @@ function makeTail(row, steps, arrAt, cont) {
   };
 }
 
+// 検索結果の「運賃の区間」から、駅 A→駅 B の運賃の表を作る（キーは "A>B"）
+function addFareSections(table, routes) {
+  for (const r of routes || []) {
+    const stations = r.steps.filter((x, i) => i % 2 === 0);
+    r.steps.forEach((a, i) => {
+      if (i % 2 !== 1 || !a.fareGroup || a.farePrice == null) return;
+      const m = /^(\d+)_(\d+)$/.exec(a.fareGroup);
+      if (!m) return;
+      const from = stations[Number(m[1])];
+      const to = stations[Number(m[2]) + 1];
+      if (from && to) table.set(`${normText(from.name)}>${normText(to.name)}`, a.farePrice);
+    });
+  }
+  return table;
+}
+
 function isSameTrain(r, t) {
   const a = r.steps.find((s) => s.kind === 'access');
   if (!a || a.walk) return false;
@@ -799,7 +819,8 @@ function rankOptions(options) {
   const list = [...byLook.values()];
   // 到着・運賃・乗換回数のどれも他より良くないもの（意味のない乗り換えなど）は出さない
   const fareOf = (o) => (o.fare == null ? 1e9 : o.fare);
-  const kept = list.filter((o) => !list.some((p) => p !== o
+  // （違う会社の路線に乗り換える経路は、少し高くても選べるように残す）
+  const kept = list.filter((o) => !o.sameCompany || !list.some((p) => p !== o
     && +p.arr <= +o.arr && p.transfers <= o.transfers && fareOf(p) <= fareOf(o)
     && (+p.arr < +o.arr || p.transfers < o.transfers || fareOf(p) < fareOf(o))));
   list.length = 0;
