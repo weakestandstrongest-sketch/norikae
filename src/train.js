@@ -7,10 +7,15 @@ import { extractNextData } from './yahoo.js';
 const TIME_RE = /^(\d{1,2}):(\d{2})$/;
 const norm = (s) => (s || '').normalize('NFKC').trim();
 
-function timeOf(v) {
+// "09:47" 形式。時刻のキー（arrivalTime など）なら Yahoo の "947"・"1005"・"2410"（翌 0:10）形式も読む
+function timeOf(v, isTimeKey) {
+  if (typeof v === 'number' && isTimeKey) v = String(v);
   if (typeof v !== 'string') return '';
-  const m = TIME_RE.exec(norm(v));
-  return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+  const s = norm(v);
+  let m = TIME_RE.exec(s);
+  if (!m && isTimeKey) m = /^(\d{1,2})(\d{2})$/.exec(s);
+  if (!m || Number(m[2]) > 59) return '';
+  return `${String(Number(m[1]) % 24).padStart(2, '0')}:${m[2]}`;
 }
 
 // 1 つの要素から { name, arr, dep, code } を取り出す。駅らしくなければ null
@@ -23,8 +28,16 @@ export function stopFromItem(item) {
   let code = '';
   for (const [k, v] of Object.entries(item)) {
     const key = k.toLowerCase();
+    const isTimeKey = /time|arr|dep|着|発/.test(key);
+    const t0 = timeOf(v, isTimeKey);
+    if (typeof v === 'number' && t0) {
+      if (/arr|着/.test(key)) arr = arr || t0;
+      else if (/dep|発/.test(key)) dep = dep || t0;
+      else any = any || t0;
+      continue;
+    }
     if (typeof v === 'string') {
-      const t = timeOf(v);
+      const t = t0;
       if (t) {
         if (/arr|着/.test(key)) arr = arr || t;
         else if (/dep|発/.test(key)) dep = dep || t;
@@ -78,6 +91,10 @@ export function outline(o, depth = 0) {
 export function parseTrainPage(html) {
   const nd = extractNextData(html);
   const pp = nd && nd.props && nd.props.pageProps;
-  const stops = pp ? findStops(pp) : [];
+  // 分かっている場所（timetableStationTrainResult.timetable.stopStation）を先に見る
+  const known = pp && pp.timetableStationTrainResult && pp.timetableStationTrainResult.timetable
+    && pp.timetableStationTrainResult.timetable.stopStation;
+  let stops = Array.isArray(known) ? known.map(stopFromItem).filter(Boolean) : [];
+  if (stops.length < 2) stops = pp ? findStops(pp) : [];
   return { stops, outline: stops.length ? null : outline(pp || {}) };
 }

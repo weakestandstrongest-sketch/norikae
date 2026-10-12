@@ -33,3 +33,30 @@ test('読めないときは原因を調べるための形の要約を返す', ()
   assert.deepEqual(r.outline, { foo: { bar: ['number', '×3'] }, baz: 'str3' });
   assert.deepEqual(findStops(null), []);
 });
+
+test('Yahoo の列車ページの形（時刻が "947" のようにコロンなし）', () => {
+  const html = wrap({
+    timetableStationTrainResult: {
+      timetable: {
+        trainId: '174601',
+        displayName: '特急',
+        stopStation: [
+          { stationCode: '25037', stationName: '知立', areaCode: '5', prefCode: '23', arrivalTime: null, departureTime: '947' },
+          { stationCode: '25001', stationName: '神宮前', areaCode: '5', prefCode: '23', arrivalTime: '1004', departureTime: '1005' },
+          { stationCode: '24990', stationName: '名鉄名古屋', areaCode: '5', prefCode: '23', arrivalTime: '1013', departureTime: '1015' },
+          { stationCode: '24468', stationName: '名鉄岐阜', areaCode: '5', prefCode: '21', arrivalTime: '1045', departureTime: null },
+        ],
+      },
+    },
+    directionDetail: { stationName: '知立' },
+  });
+  const r = parseTrainPage(html);
+  assert.deepEqual(r.stops.map((s) => `${s.name}(${s.code}) ${s.arr}/${s.dep}`),
+    ['知立(25037) /09:47', '神宮前(25001) 10:04/10:05', '名鉄名古屋(24990) 10:13/10:15', '名鉄岐阜(24468) 10:45/']);
+});
+
+test('24 時台（"2410"）は 0:10、駅コードは時刻と間違えない', () => {
+  assert.deepEqual(stopFromItem({ stationCode: '1234', stationName: '終点', arrivalTime: '2410' }),
+    { name: '終点', arr: '00:10', dep: '', code: '1234' });
+  assert.equal(stopFromItem({ stationName: '駅', prefCode: '2359' }), null);
+});
