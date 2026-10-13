@@ -350,6 +350,76 @@ function moreRoutesButton(q, seq, page, total) {
   return b;
 }
 
+// ---------- ひび手帳の中で開いたとき（?embed=hibi） ----------
+// ひび手帳の予定シートの中に埋め込まれたときだけ、見た目をひび手帳に合わせ、
+// 各ルートに「タイムラインに追加」ボタンを出して、選んだ経路を親の画面へ送る。
+const HIBI = (() => {
+  const p = new URLSearchParams(location.search);
+  let cfg = null;
+  try { cfg = JSON.parse(sessionStorage.getItem('norikae:hibi') || 'null'); } catch (e) { /* なし */ }
+  if (p.get('embed') === 'hibi') {
+    const parent = p.get('parent') || '';
+    cfg = {
+      parent: /^https:\/\/[a-z0-9-]+\.github\.io$/i.test(parent) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(parent) ? parent : '',
+      theme: p.get('theme') === 'dark' ? 'dark' : 'light',
+      accent: /^#[0-9a-f]{6}$/i.test(p.get('accent') || '') ? p.get('accent') : '',
+      date: /^\d{4}-\d{2}-\d{2}$/.test(p.get('date') || '') ? p.get('date') : '',
+      time: /^\d{1,2}:\d{2}$/.test(p.get('time') || '') ? p.get('time').padStart(5, '0') : '',
+    };
+    try { sessionStorage.setItem('norikae:hibi', JSON.stringify(cfg)); } catch (e) { /* 保存できなくても動作は続ける */ }
+  }
+  if (!cfg || window.parent === window) return null;
+  const root = document.documentElement;
+  root.classList.add('hibi');
+  if (cfg.theme === 'dark') root.classList.add('dark');
+  if (cfg.accent) root.style.setProperty('--hibi-accent', cfg.accent);
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'hibi.css';
+  document.head.append(link);
+  settings.engine = 'app'; // 地図アプリなどへは埋め込みの中から移動できないので、アプリ内検索だけにする
+  return cfg;
+})();
+
+function hibiPayload(route) {
+  const q = shownQuery || currentQuery();
+  const s = route.summary;
+  const stations = route.steps.filter((x) => x.kind === 'station');
+  return {
+    v: 1,
+    from: (stations[0] && stations[0].name) || q.from,
+    to: (stations[stations.length - 1] && stations[stations.length - 1].name) || q.to,
+    via: q.via || '',
+    date: whenDate(q.when),
+    dep: s.dep,
+    arr: s.arr,
+    duration: s.duration || '',
+    transfers: s.transfers,
+    fare: s.fare,
+    fareNote: s.fareNote || '',
+    tags: s.tags || [],
+    steps: route.steps.map((st) => (st.kind === 'station'
+      ? { k: 's', name: st.name, arr: st.arr || '', dep: st.dep || '' }
+      : {
+        k: 'a', line: st.line || '', dest: st.destination || '', color: st.color || '', walk: !!st.walk,
+        platform: st.platform || '', stops: st.stops || '',
+        stopList: (st.stopList || []).map((x) => ({ time: x.time, name: x.name })),
+      })),
+  };
+}
+
+function hibiAddButton(route) {
+  const b = el('button', 'hibi-add', '＋ ひび手帳のタイムラインに追加');
+  b.type = 'button';
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    window.parent.postMessage({ type: 'hibi:addRoute', route: hibiPayload(route) }, HIBI.parent || '*');
+    b.disabled = true;
+    b.textContent = '追加しました';
+  });
+  return b;
+}
+
 function renderRoute(route, index, expanded) {
   const s = route.summary;
   const card = el('article', 'card route');
@@ -385,6 +455,7 @@ function renderRoute(route, index, expanded) {
   });
 
   card.append(head, detail);
+  if (HIBI) card.append(hibiAddButton(route));
   return card;
 }
 
@@ -1514,6 +1585,10 @@ function init() {
   $('diaDlg').addEventListener('click', (e) => { if (e.target === $('diaDlg')) $('diaDlg').close(); });
 
   routeFromLocation(true);
+  if (HIBI && HIBI.date && !new URLSearchParams(location.search).get('to')) {
+    whenEl.value = `${HIBI.date}T${HIBI.time || '09:00'}`;
+    timeIsCustom = true;
+  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

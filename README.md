@@ -25,6 +25,19 @@ Worker が Yahoo!乗換案内の結果ページを取得し、経路・時刻・
 - 設定で表示順・IC/きっぷ・特急の席・歩く速さ・新幹線/特急/バス等の利用有無を変更
 - Apple マップ／Google マップで開くこともできます
 
+## ひび手帳との連携
+
+[ひび手帳](https://github.com/weakestandstrongest-sketch/dairy2) のタイムラインにある電車のボタンから、このアプリをひび手帳の中で開けます。
+`?embed=hibi` 付きで開かれたときだけ、見た目をひび手帳に合わせ（`public/hibi.css`）、各ルートに「ひび手帳のタイムラインに追加」ボタンを出します。
+ボタンを押すと、経路（時刻・路線・番線・運賃）を親の画面（`parent` に指定された `*.github.io`）へ `postMessage` で送り、ひび手帳が予定として保存します。
+
+| パラメータ | 内容 |
+|---|---|
+| `embed=hibi` | ひび手帳の中で開く |
+| `parent` | ひび手帳の origin（例 `https://xxxx.github.io`） |
+| `theme` / `accent` | `light`・`dark` / テーマカラー（`#E07F78` など） |
+| `date` / `time` | 検索の初期日時（`to` が無くても日時だけ入れる） |
+
 ## URL で直接検索
 
 ```

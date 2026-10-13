@@ -1,0 +1,63 @@
+/* Look used when のりかえ is opened inside ひび手帳 (?embed=hibi). Matches ひび手帳's palette, rounded type and soft cards. */
+html.hibi {
+  --bg: #F5EFEB;
+  --card: #FFFFFF;
+  --text: #232A5C;
+  --sub: #6D7092;
+  --line: #E9E1DB;
+  --accent: var(--hibi-accent, #E07F78);
+  --accent-text: #FFFFFF;
+  --field: #FAF6F3;
+  --shadow: 0 6px 22px rgba(35, 42, 92, .08);
+}
+html.hibi.dark {
+  --bg: #141414;
+  --card: #252526;
+  --text: #F2F1F4;
+  --sub: #A3A3AD;
+  --line: #303034;
+  --accent: var(--hibi-accent, #EF8A82);
+  --accent-text: #1A1414;
+  --field: #1C1C1D;
+  --shadow: none;
+  color-scheme: dark;
+}
+html.hibi body {
+  font-family: ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN", "Hiragino Sans", "Zen Maru Gothic", sans-serif;
+  padding-top: 0;
+}
+html.hibi .topbar { padding: 6px 16px 2px; }
+html.hibi .topbar h1 { font-size: 22px; font-weight: 700; }
+html.hibi .icon-btn { color: var(--text); }
+html.hibi .card { border-radius: 22px; box-shadow: var(--shadow); padding: 16px 16px 18px; }
+html.hibi .station-row input, html.hibi .time-row input { border-radius: 14px; }
+html.hibi .chip { color: var(--accent); background: var(--field); font-weight: 700; }
+html.hibi .seg { border-radius: 12px; }
+html.hibi .seg span { border-radius: 10px; }
+html.hibi .primary { border-radius: 999px; font-weight: 700; box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 35%, transparent); }
+html.hibi .alt-engines, html.hibi #engineHint { display: none; }
+html.hibi .section-head h2 { font-size: 16px; }
+html.hibi .route { overflow: hidden; }
+html.hibi .times .big { letter-spacing: -.01em; }
+html.hibi .tag { border-radius: 99px; padding: 2px 9px; }
+html.hibi .tl-dot { border-color: var(--accent); }
+html.hibi .result-foot { display: none; }
+html.hibi dialog { border-radius: 22px; }
+.hibi-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: calc(100% - 32px);
+  margin: 0 16px 16px;
+  padding: 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hibi-add:disabled { opacity: .6; }
