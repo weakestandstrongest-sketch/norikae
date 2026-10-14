@@ -62,7 +62,7 @@ async function handleSuggest(request, env, ctx) {
   if (q.length > 30) return json({ error: '長すぎます', items: [] }, 400);
 
   const cache = caches.default;
-  const cacheKey = new Request(`https://cache.norikae/suggest-v2?${new URLSearchParams({ q })}`);
+  const cacheKey = new Request(`https://cache.norikae/suggest-v3?${new URLSearchParams({ q })}`);
   if (!debug) {
     const cached = await cache.match(cacheKey);
     if (cached) return cached;

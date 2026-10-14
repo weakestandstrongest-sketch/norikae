@@ -56,7 +56,7 @@ https://norikae.<あなたのサブドメイン>.workers.dev/?from=新宿&to=渋
 | `engine` | `app`（アプリ内）`apple` `google` `yahoo`（省略時は設定のもの） |
 | `go=1` | 開いたらすぐ検索 |
 
-入力候補は `/api/suggest?q=則武` で取得できます（Yahoo!乗換案内の時刻表検索ページから駅・バス停を取り出し、1 日キャッシュ）。`&debug=1` を付けると、ページをどう読み取ったかも返します。
+入力候補は `/api/suggest?q=則武` で取得できます（Yahoo!乗換案内の `/timetable/search`（鉄道の駅）と `/station/search`（バス停も含む）から取り出し、1 日キャッシュ）。`&debug=1` を付けると、ページをどう読み取ったかも返します。
 
 ## 公開方法（Cloudflare Workers・無料）
 

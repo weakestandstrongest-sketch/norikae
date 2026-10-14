@@ -66,7 +66,7 @@ test('/api/suggest はいくつかのページをまとめて候補にする', a
   globalThis.caches = { default: { match: async () => null, put: async () => {} } };
   globalThis.fetch = async (url) => {
     const u = String(url);
-    if (u.includes('cont=bus')) return new Response(wrap({ items: [{ name: '則武本郷/岐阜バス' }] }));
+    if (u.includes('/station/search')) return new Response(wrap({ items: [{ name: '則武本郷/岐阜バス' }] }));
     if (u.includes('/timetable/search')) return new Response(wrap({ q: '則武本郷' }));
     return new Response('not found', { status: 404 });
   };
@@ -75,10 +75,18 @@ test('/api/suggest はいくつかのページをまとめて候補にする', a
     const res = await worker.fetch(new Request('https://x/api/suggest?q=' + encodeURIComponent('則武本郷')), {}, ctx);
     assert.deepEqual((await res.json()).items.map((i) => i.value), ['則武本郷/岐阜バス']);
     const dbg = await (await worker.fetch(new Request('https://x/api/suggest?debug=1&q=' + encodeURIComponent('則武本郷')), {}, ctx)).json();
-    assert.equal(dbg.pages.length, 5);
+    assert.equal(dbg.pages.length, 3);
     assert.ok(dbg.pages.some((pg) => pg.items.includes('則武本郷/岐阜バス')));
   } finally {
     globalThis.fetch = saved.fetch;
     globalThis.caches = saved.caches;
   }
+});
+
+test('実際の駅・バス停検索ページの形（タイトル・説明文は拾わず、全角／もまとめる）', () => {
+  const html = wrap({ serverTimer: 1, isPC: false }).replace('<div>本文</div>',
+    '<title>則武本郷/岐阜バスの周辺情報 - Yahoo!路線情報</title><meta name="description" content="則武本郷/岐阜バスの情報です。時刻表、乗換案内、出口案内">'
+    + '<meta name="keywords" content="則武本郷/岐阜バス,時刻表,乗換案内,構内図,天気,地図"><h1>則武本郷／岐阜バス</h1><a href="/station/1">則武本郷/岐阜バス</a>');
+  assert.deepEqual(parseSuggest(html, '則武本郷').map((i) => i.value), ['則武本郷/岐阜バス']);
+  assert.deepEqual(normalizeCandidate('則武本郷／岐阜バス').value, '則武本郷/岐阜バス');
 });

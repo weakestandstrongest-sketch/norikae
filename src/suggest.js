@@ -12,11 +12,10 @@ export function suggestPath(q) {
   return `/timetable/search?${new URLSearchParams({ q })}`;
 }
 
-// 候補が載っていそうな Yahoo のページ。駅の時刻表検索は鉄道の駅しか出ないことがあるので、いくつか同時に見る
+// 候補が載っている Yahoo のページ（両方を同時に見る）
+// /timetable/search は鉄道の駅だけ、/station/search はバス停（「則武本郷/岐阜バス」）も出る
 export const SUGGEST_SOURCES = [
   (q) => suggestPath(q),
-  (q) => `/timetable/list?${new URLSearchParams({ cont: 'station', q })}`,
-  (q) => `/timetable/list?${new URLSearchParams({ cont: 'bus', q })}`,
   (q) => `/station/search?${new URLSearchParams({ q })}`,
 ];
 // 読み取り状況を調べるとき（debug=1）だけ、経路検索のページも見る（Yahoo が地名と判断したときの「ほかの候補」）
@@ -54,7 +53,7 @@ const stripTags = (s) => String(s).replace(/<[^>]*>/g, '').replace(/&amp;/g, '&'
  * 「金山(愛知県)」は同名の駅を区別しているだけなので駅のまま。
  */
 export function normalizeCandidate(raw, extra = {}) {
-  let name = stripTags(raw).replace(/\s+/g, ' ').trim();
+  let name = stripTags(raw).normalize('NFKC').replace(/\s+/g, ' ').trim(); // 「則武本郷／岐阜バス」の全角／もそろえる
   if (!name || name.length > 60) return null;
   let company = String(extra.company || '').trim();
   let bus = !!extra.bus;
@@ -67,7 +66,7 @@ export function normalizeCandidate(raw, extra = {}) {
   }
   name = name.replace(/\s*(バス停|停留所)$/, '');
   if (company && BUSY.test(company)) bus = true;
-  const keep = brk && !bus ? stripTags(raw).trim() : name; // 「金山(愛知県)」はそのまま
+  const keep = brk && !bus ? stripTags(raw).normalize('NFKC').trim() : name; // 「金山(愛知県)」はそのまま
   const value = bus && company ? `${name}/${company}` : keep;
   return { name: bus ? name : keep, value, kind: bus ? 'bus' : 'station', company: bus ? company : '' };
 }
