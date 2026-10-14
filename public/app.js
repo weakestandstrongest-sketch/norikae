@@ -164,7 +164,6 @@ function setVias(values) {
     const input = el('input');
     input.type = 'text';
     input.placeholder = `経由駅${values.length > 1 ? i + 1 : ''}`;
-    input.setAttribute('list', 'stationList');
     input.setAttribute('enterkeyhint', 'next');
     input.value = v;
     const del = el('button', 'chip', '✕');
@@ -187,7 +186,7 @@ function rememberStations(routes) {
   const set = new Set(seen);
   for (const r of routes) {
     for (const st of r.steps) {
-      if (st.kind === 'station' && st.isStation && st.name && !st.name.includes('/')) set.add(st.name);
+      if (st.kind === 'station' && st.isStation && st.name) set.add(st.name); // 「則武本郷/岐阜バス」などのバス停も覚える
     }
   }
   if (set.size === seen.length) return;
@@ -210,6 +209,8 @@ function currentQuery() {
 function search(engine) {
   engine = engine || settings.engine;
   if (!timeIsCustom) setNow(); // 「今」のまま時間がたっていたら最新の時刻で検索
+  hideSugg();
+  if (engine === 'app' || engine === 'yahoo') resolveBusStops();
   const q = currentQuery();
   const needsStation = engine === 'app' || engine === 'yahoo';
 
@@ -308,6 +309,8 @@ async function showResults(q, push, opts = {}) {
   resultLoading = false;
 
   list.textContent = '';
+  const alt = altCard(q, data.alt);
+  if (alt) list.append(alt);
   if (!data.routes || !data.routes.length) {
     const box = el('div', 'card error');
     box.append(el('p', '', data.error || '経路が見つかりませんでした'));
@@ -378,7 +381,7 @@ const HIBI = (() => {
     root.classList.add('hibi-wait');
     link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = 'hibi.css?v=17';
+    link.href = 'hibi.css?v=18';
     link.id = 'hibiCss';
     document.head.append(link);
   }
@@ -1349,13 +1352,151 @@ function renderLists() {
   });
   // 検索結果に出てきた駅名（「金山(愛知県)」など、そのまま検索に使える正式な名前）
   store.get('seenStations', []).forEach((n) => names.add(n));
-  const dl = $('stationList');
-  dl.textContent = '';
-  names.forEach((n) => {
-    const opt = document.createElement('option');
-    opt.value = n;
-    dl.append(opt);
-  });
+  knownNames = [...names];
+}
+
+// ---------- 入力候補（駅・バス停） ----------
+// 入力中に、履歴・お気に入り・検索結果に出てきた名前と、Yahoo の「駅・バス停」候補を出す。
+// バス停は Yahoo で「則武本郷/岐阜バス」と書くと確実に使えるので、選ぶとその形で入る。
+let knownNames = [];
+const suggCache = new Map();
+let suggTimer = 0;
+let suggInput = null;
+const suggBox = el('div', 'sugg');
+suggBox.hidden = true;
+suggBox.setAttribute('role', 'listbox');
+
+const normName = (s) => String(s || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase()
+  .replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
+
+function candOf(v) {
+  const m = /^(.+?)\/(.+)$/.exec(v);
+  return m ? { name: m[1], value: v, kind: 'bus', company: m[2] } : { name: v, value: v, kind: 'station', company: '' };
+}
+
+function suggestionsFor(text) {
+  const q = normName(text);
+  if (!q) return [];
+  const mine = knownNames.filter((n) => n !== CURRENT_LOCATION && normName(n).includes(q))
+    .map((n) => ({ ...candOf(n), mine: true }))
+    .sort((a, b) => (normName(a.name).startsWith(q) ? 0 : 1) - (normName(b.name).startsWith(q) ? 0 : 1))
+    .slice(0, 4);
+  const remote = suggCache.get(q) || [];
+  const seen = new Set();
+  return [...mine, ...remote].filter((c) => (seen.has(c.value) ? false : seen.add(c.value))).slice(0, 8);
+}
+
+async function fetchSuggest(text) {
+  const q = normName(text);
+  if (!q || suggCache.has(q)) return;
+  try {
+    const res = await fetch('api/suggest?' + query({ q: text.trim() }));
+    const data = await res.json();
+    suggCache.set(q, Array.isArray(data.items) ? data.items : []);
+  } catch (e) {
+    return; // 通信できなくても、履歴からの候補だけ出す
+  }
+  if (suggInput && normName(suggInput.value) === q) renderSugg(suggInput);
+}
+
+function hideSugg() {
+  suggBox.hidden = true;
+  suggInput = null;
+}
+
+function renderSugg(input) {
+  const text = input.value.trim();
+  const items = text && text !== CURRENT_LOCATION ? suggestionsFor(text) : [];
+  // 入力とまったく同じものしかないなら出さない
+  if (!items.length || (items.length === 1 && items[0].value === text)) { suggBox.hidden = true; return; }
+  suggBox.textContent = '';
+  for (const c of items) {
+    const b = el('button', 'sugg-item');
+    b.type = 'button';
+    b.setAttribute('role', 'option');
+    b.append(el('span', 'sugg-ic ' + c.kind, c.kind === 'bus' ? '🚌' : '🚉'));
+    const t = el('span', 'sugg-t');
+    t.append(el('b', '', c.name));
+    t.append(el('small', '', c.kind === 'bus' ? `バス停${c.company ? '・' + c.company : ''}` : '駅'));
+    b.append(t);
+    if (c.mine) b.append(el('span', 'sugg-tag', '履歴'));
+    // タップでキーボードが閉じる前に選べるように
+    b.addEventListener('pointerdown', (e) => e.preventDefault());
+    b.addEventListener('click', () => pickSugg(input, c));
+    suggBox.append(b);
+  }
+  const row = input.closest('.station-row');
+  const wrap = $('searchForm').querySelector('.stations');
+  if (suggBox.parentNode !== wrap) wrap.append(suggBox);
+  suggBox.style.top = `${row.offsetTop + row.offsetHeight + 4}px`;
+  suggBox.hidden = false;
+}
+
+function pickSugg(input, c) {
+  input.value = c.value;
+  if (input === fromEl) { fromCoords = null; $('nearbyRow').hidden = true; }
+  hideSugg();
+  if (input === fromEl) toEl.focus();
+  else input.blur();
+}
+
+function onStationInput(e) {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement) || !input.closest('.station-row')) return;
+  suggInput = input;
+  renderSugg(input);
+  clearTimeout(suggTimer);
+  const text = input.value.trim();
+  if (text && text !== CURRENT_LOCATION && !text.includes('/')) suggTimer = setTimeout(() => fetchSuggest(text), 220);
+}
+
+// 「則武本郷」だけ入れたとき：同じ名前の駅がなく、バス停がひとつに決まるなら「則武本郷/岐阜バス」で検索する
+function resolveBusStops() {
+  const changed = [];
+  for (const input of [fromEl, toEl, ...viaInputs()]) {
+    const v = input.value.trim();
+    if (!v || v === CURRENT_LOCATION || v.includes('/')) continue;
+    const key = normName(v);
+    const cands = [...knownNames.map(candOf), ...(suggCache.get(key) || [])].filter((c) => normName(c.name) === key);
+    if (cands.some((c) => c.kind === 'station')) continue;
+    const buses = [...new Set(cands.filter((c) => c.kind === 'bus').map((c) => c.value))];
+    if (buses.length !== 1) continue;
+    input.value = buses[0];
+    if (input === fromEl) fromCoords = null;
+    changed.push(buses[0]);
+  }
+  if (changed.length) toast(`バス停「${changed.join('」「')}」で検索します`);
+}
+
+// 結果画面：Yahoo が「ほかの候補」を出したときに、ワンタップで出発・到着を差し替える
+function altCard(q, alt) {
+  if (!alt) return null;
+  const pick = (list, cur) => (list || []).filter((c) => c && c.value && c.value !== cur).slice(0, 4);
+  const from = pick(alt.from, q.from);
+  const to = pick(alt.to, q.to);
+  if (!from.length && !to.length) return null;
+  const box = el('div', 'card alt-card');
+  box.append(el('p', 'alt-head', 'もしかして'));
+  const row = (label, list, key) => {
+    if (!list.length) return;
+    const r = el('div', 'alt-row');
+    r.append(el('span', 'alt-label', label));
+    for (const c of list) {
+      const b = el('button', 'chip', `${c.kind === 'bus' ? '🚌 ' : ''}${c.name}${c.company ? `（${c.company}）` : ''}`);
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        const nq = { ...q, [key]: c.value };
+        if (key === 'from') { nq.coords = null; fromEl.value = c.value; } else toEl.value = c.value;
+        addHistory(nq);
+        showResults(nq, true);
+      });
+      r.append(b);
+    }
+    box.append(r);
+  };
+  row('出発', from, 'from');
+  row('到着', to, 'to');
+  return box;
 }
 
 // ---------- 現在地 ----------
@@ -1541,6 +1682,12 @@ function init() {
   renderEngineButtons();
 
   $('searchForm').addEventListener('submit', (e) => { e.preventDefault(); search(); });
+  $('searchForm').addEventListener('input', onStationInput);
+  $('searchForm').addEventListener('focusin', (e) => { if (e.target.closest && e.target.closest('.station-row') && e.target.tagName === 'INPUT') onStationInput(e); });
+  $('searchForm').addEventListener('focusout', () => setTimeout(() => {
+    const a = document.activeElement;
+    if (!a || !a.closest || !a.closest('.station-row')) hideSugg();
+  }, 120));
   fromEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); toEl.focus(); }
   });

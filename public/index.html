@@ -30,7 +30,7 @@
         if (cfg.theme === 'dark') r.classList.add('dark');
         if (/^#[0-9a-f]{6}$/i.test(cfg.accent || '')) r.style.setProperty('--hibi-accent', cfg.accent);
         var l = document.createElement('link');
-        l.rel = 'stylesheet'; l.href = 'hibi.css?v=17'; l.id = 'hibiCss';
+        l.rel = 'stylesheet'; l.href = 'hibi.css?v=18'; l.id = 'hibiCss';
         l.onload = function () { r.setAttribute('data-hibi-css', 'ok'); };
         l.onerror = function () { r.setAttribute('data-hibi-css', 'ng'); };
         document.head.appendChild(l);
@@ -50,19 +50,18 @@
       <div class="stations">
         <div class="station-row">
           <span class="dot from" aria-hidden="true"></span>
-          <input id="from" name="from" type="text" placeholder="出発駅" list="stationList" enterkeyhint="next">
+          <input id="from" name="from" type="text" placeholder="出発駅" enterkeyhint="next">
           <button type="button" id="locBtn" class="chip" aria-label="現在地から">📍現在地</button>
         </div>
         <div id="viaList"></div>
         <div class="station-row">
           <span class="dot to" aria-hidden="true"></span>
-          <input id="to" name="to" type="text" placeholder="到着駅" list="stationList" enterkeyhint="search">
+          <input id="to" name="to" type="text" placeholder="到着駅" enterkeyhint="search">
           <button type="button" id="viaBtn" class="chip">＋経由</button>
         </div>
         <button type="button" id="swapBtn" class="swap" aria-label="出発と到着を入れ替え">⇅</button>
       </div>
       <div class="nearby" id="nearbyRow" hidden></div>
-      <datalist id="stationList"></datalist>
 
       <div class="seg" role="radiogroup" aria-label="日時の種類">
         <label><input type="radio" name="type" value="dep" checked><span>出発</span></label>

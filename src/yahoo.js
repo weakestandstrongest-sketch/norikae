@@ -1,4 +1,5 @@
 import { parse } from 'node-html-parser';
+import { parseAlternatives } from './suggest.js';
 
 export const YAHOO_ORIGIN = 'https://transit.yahoo.co.jp';
 
@@ -319,9 +320,13 @@ export function parseNextData(nd) {
 }
 
 export function parseResult(html) {
-  const fromJson = parseNextData(extractNextData(html));
-  if (fromJson && fromJson.routes.length) return fromJson;
-  return parseResultHtml(html);
+  const nd = extractNextData(html);
+  const fromJson = parseNextData(nd);
+  const out = fromJson && fromJson.routes.length ? fromJson : parseResultHtml(html);
+  // 「出発地・到着地のほかの候補」（バス停など、入力どおりでない候補があるとき）
+  const alt = parseAlternatives(nd);
+  if (alt) out.alt = alt;
+  return out;
 }
 
 // JSON がないときのために、HTML からも読めるようにしておく

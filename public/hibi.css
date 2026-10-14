@@ -62,3 +62,6 @@ html.hibi dialog { border-radius: 22px; }
   cursor: pointer;
 }
 .hibi-add:disabled { opacity: .6; }
+html.hibi .sugg { border-radius: 18px; border-color: var(--line); box-shadow: 0 12px 32px rgba(35, 42, 92, .16); }
+html.hibi.dark .sugg { box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+html.hibi .sugg-ic { background: color-mix(in srgb, var(--accent) 14%, var(--card)); }

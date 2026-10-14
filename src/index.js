@@ -2,6 +2,7 @@ import { buildSearchUrl, parseResult, InputError, YAHOO_ORIGIN } from './yahoo.j
 import { parseCoords, findNearest, findAddress } from './nearest.js';
 import { lookupTimetable } from './timetable.js';
 import { parseTrainPage } from './train.js';
+import { suggestPath, parseSuggest } from './suggest.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 
@@ -42,12 +43,49 @@ async function handleSearch(request, env, ctx) {
     return json({ error: `Yahoo!乗換案内がエラーを返しました（${res.status}）`, yahooUrl: publicUrl }, 502);
   }
 
-  const { routes, total } = parseResult(await res.text());
+  const { routes, total, alt } = parseResult(await res.text());
   const body = routes.length
     ? { routes, total: total || routes.length, yahooUrl: publicUrl }
     : { routes, yahooUrl: publicUrl, error: '経路が見つかりませんでした。駅名を確認するか、Yahoo で直接開いてください' };
+  if (alt) body.alt = alt;
   const out = json(body, 200, { 'cache-control': 'public, max-age=60' });
   if (routes.length) ctx.waitUntil(cache.put(cacheKey, out.clone()));
+  return out;
+}
+
+// 駅名・バス停名の入力候補（?q=則武 → 則武本郷/岐阜バス など）。debug=1 でページの読み取り状況も返す
+async function handleSuggest(request, env, ctx) {
+  const p = new URL(request.url).searchParams;
+  const q = (p.get('q') || '').normalize('NFKC').trim();
+  const debug = p.get('debug') === '1';
+  if (!q) return json({ items: [] });
+  if (q.length > 30) return json({ error: '長すぎます', items: [] }, 400);
+
+  const cache = caches.default;
+  const cacheKey = new Request(`https://cache.norikae/suggest-v1?${new URLSearchParams({ q })}`);
+  if (!debug) {
+    const cached = await cache.match(cacheKey);
+    if (cached) return cached;
+  }
+  let html = '';
+  let status = 0;
+  try {
+    const res = await fetch((env.UPSTREAM || YAHOO_ORIGIN) + suggestPath(q), {
+      headers: { 'user-agent': UA, 'accept-language': 'ja' },
+      cf: { cacheTtl: 86400, cacheEverything: true },
+    });
+    status = res.status;
+    if (res.ok) html = await res.text();
+  } catch (e) {
+    status = -1;
+  }
+  const items = html ? parseSuggest(html, q) : [];
+  if (debug) {
+    const links = [...html.matchAll(/href="([^"]*(?:timetable|station)[^"]*)"/g)].slice(0, 15).map((m) => m[1]);
+    return json({ q, status, length: html.length, hasNextData: html.includes('__NEXT_DATA__'), links, items });
+  }
+  const out = json({ items }, 200, { 'cache-control': `public, max-age=${items.length ? 86400 : 600}` });
+  if (html) ctx.waitUntil(cache.put(cacheKey, out.clone()));
   return out;
 }
 
@@ -149,6 +187,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/api/search') return withCors(await handleSearch(request, env, ctx), request.headers.get('origin'));
+    if (url.pathname === '/api/suggest') return handleSuggest(request, env, ctx);
     if (url.pathname === '/api/nearest') return handleNearest(request);
     if (url.pathname === '/api/timetable') return handleTimetable(request, env, ctx);
     if (url.pathname === '/api/train') return handleTrain(request, env, ctx);
