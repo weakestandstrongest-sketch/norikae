@@ -27,7 +27,7 @@ Worker が Yahoo!乗換案内の結果ページを取得し、経路・時刻・
 
 ## ひび手帳との連携
 
-[ひび手帳](https://github.com/weakestandstrongest-sketch/dairy2) のタイムラインにある電車のボタンから、このアプリをひび手帳の中で開けます。
+[ひび手帳](https://github.com/weakestandstrongest-sketch/day) のタイムラインにある電車のボタンから、このアプリをひび手帳の中で開けます。
 `?embed=hibi` 付きで開かれたときだけ、見た目をひび手帳に合わせ（`public/hibi.css`）、各ルートに「ひび手帳のタイムラインに追加」ボタンを出します。
 ボタンを押すと、経路（時刻・路線・番線・運賃）を親の画面（`parent` に指定された `*.github.io`）へ `postMessage` で送り、ひび手帳が予定として保存します。
 
