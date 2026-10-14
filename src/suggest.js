@@ -12,6 +12,36 @@ export function suggestPath(q) {
   return `/timetable/search?${new URLSearchParams({ q })}`;
 }
 
+// 候補が載っていそうな Yahoo のページ。駅の時刻表検索は鉄道の駅しか出ないことがあるので、いくつか同時に見る
+export const SUGGEST_SOURCES = [
+  (q) => suggestPath(q),
+  (q) => `/timetable/list?${new URLSearchParams({ cont: 'station', q })}`,
+  (q) => `/timetable/list?${new URLSearchParams({ cont: 'bus', q })}`,
+  (q) => `/station/search?${new URLSearchParams({ q })}`,
+];
+// 読み取り状況を調べるとき（debug=1）だけ、経路検索のページも見る（Yahoo が地名と判断したときの「ほかの候補」）
+export const PROBE_SOURCES = [
+  ...SUGGEST_SOURCES,
+  (q) => `/search/result?${new URLSearchParams({ from: q, to: '岐阜' })}`,
+];
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** 調査用：ページの中で入力の文字が出てくる所と、埋め込み JSON の主なキー */
+export function probePage(html, q) {
+  const hits = new Set();
+  if (q) {
+    for (const m of String(html || '').matchAll(new RegExp(`[^"<>]{0,10}${escapeRe(q)}[^"<>]{0,24}`, 'g'))) {
+      hits.add(m[0].trim());
+      if (hits.size >= 8) break;
+    }
+  }
+  const nd = extractNextData(html);
+  const pp = nd && nd.props && nd.props.pageProps;
+  const keys = pp && typeof pp === 'object' ? Object.keys(pp).slice(0, 16) : [];
+  return { hits: [...hits], keys };
+}
+
 const norm = (s) => String(s || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
 // ひらがな → カタカナ（読みでも照合できるように）
 const kata = (s) => norm(s).replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
@@ -76,6 +106,19 @@ function collectFromJson(node, out, depth = 0) {
   if (typeof node === 'object') for (const v of Object.values(node)) collectFromJson(v, out, depth + 1);
 }
 
+// キー名が分からなくても拾えるように、入力を含む短い文字列も候補にする（見出し・説明文は除く）
+const NOT_NAME = /時刻表|検索|結果|一覧|乗換|路線図|周辺|地図|について|ページ|https?:|[。、！？!?]/;
+function collectStrings(node, qn, out, depth = 0) {
+  if (node == null || depth > 10) return;
+  if (typeof node === 'string') {
+    const t = node.trim();
+    // 入力そのもの（検索語の繰り返し）は候補にしない
+    if (t.length <= 40 && !NOT_NAME.test(t) && kata(t).includes(qn) && kata(t) !== qn) out.push({ raw: t, from: 'json', loose: true });
+    return;
+  }
+  if (typeof node === 'object') for (const v of Object.values(node)) collectStrings(v, qn, out, depth + 1);
+}
+
 /** 検索ページの HTML から候補（最大 limit 件）を取り出す */
 export function parseSuggest(html, q, limit = 12) {
   const raw = [];
@@ -84,8 +127,18 @@ export function parseSuggest(html, q, limit = 12) {
     raw.push({ raw: m[2], code: m[1], from: 'link' });
   }
   // 2) ページに埋め込まれた JSON
+  // どのページへのリンクでも、文字に入力を含むもの
+  for (const m of String(html || '').matchAll(/<a\b[^>]*>([\s\S]{1,120}?)<\/a>/g)) {
+    const t = stripTags(m[1]);
+    if (t && t.length <= 40 && !NOT_NAME.test(t) && kata(t).includes(kata(q)) && kata(t) !== kata(q)) raw.push({ raw: t, from: 'json', loose: true });
+  }
   const nd = extractNextData(html);
-  if (nd && nd.props) collectFromJson(nd.props.pageProps, raw);
+  if (nd && nd.props) {
+    collectFromJson(nd.props.pageProps, raw);
+    collectStrings(nd.props.pageProps, kata(q), raw);
+    const alt = parseAlternatives(nd);
+    if (alt) for (const c of [...alt.from, ...alt.to]) raw.push({ raw: c.value, from: 'json' });
+  }
 
   const qn = kata(q);
   const out = [];
@@ -105,11 +158,14 @@ export function parseSuggest(html, q, limit = 12) {
       continue;
     }
     seen.add(key);
-    out.push({ ...c, code: r.code && /^\d{1,9}$/.test(r.code) ? r.code : '' });
+    out.push({ ...c, code: r.code && /^\d{1,9}$/.test(r.code) ? r.code : '', loose: !!r.loose });
   }
+  // 文字列から拾っただけの名前が、会社名つきのバス停と同じなら、バス停のほうだけ残す
+  const busNames = new Set(out.filter((c) => c.kind === 'bus').map((c) => c.name));
+  const kept = out.filter((c) => !(c.loose && c.kind === 'station' && busNames.has(c.name))).map(({ loose, ...c }) => c);
   // 入力で始まるもの → 入力を含むもの の順。元の並び（Yahoo の順）は保つ
   const starts = (c) => kata(c.name).startsWith(qn) ? 0 : 1;
-  return out
+  return kept
     .map((c, i) => ({ c, i }))
     .sort((a, b) => starts(a.c) - starts(b.c) || a.i - b.i)
     .slice(0, limit)

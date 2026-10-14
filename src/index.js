@@ -2,7 +2,7 @@ import { buildSearchUrl, parseResult, InputError, YAHOO_ORIGIN } from './yahoo.j
 import { parseCoords, findNearest, findAddress } from './nearest.js';
 import { lookupTimetable } from './timetable.js';
 import { parseTrainPage } from './train.js';
-import { suggestPath, parseSuggest } from './suggest.js';
+import { SUGGEST_SOURCES, PROBE_SOURCES, parseSuggest, probePage } from './suggest.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 
@@ -62,28 +62,35 @@ async function handleSuggest(request, env, ctx) {
   if (q.length > 30) return json({ error: '長すぎます', items: [] }, 400);
 
   const cache = caches.default;
-  const cacheKey = new Request(`https://cache.norikae/suggest-v1?${new URLSearchParams({ q })}`);
+  const cacheKey = new Request(`https://cache.norikae/suggest-v2?${new URLSearchParams({ q })}`);
   if (!debug) {
     const cached = await cache.match(cacheKey);
     if (cached) return cached;
   }
-  let html = '';
-  let status = 0;
-  try {
-    const res = await fetch((env.UPSTREAM || YAHOO_ORIGIN) + suggestPath(q), {
-      headers: { 'user-agent': UA, 'accept-language': 'ja' },
-      cf: { cacheTtl: 86400, cacheEverything: true },
-    });
-    status = res.status;
-    if (res.ok) html = await res.text();
-  } catch (e) {
-    status = -1;
-  }
-  const items = html ? parseSuggest(html, q) : [];
+  const fetchText = async (path) => {
+    try {
+      const res = await fetch((env.UPSTREAM || YAHOO_ORIGIN) + path, {
+        headers: { 'user-agent': UA, 'accept-language': 'ja' },
+        cf: { cacheTtl: 86400, cacheEverything: true },
+      });
+      return { path, status: res.status, html: res.ok ? await res.text() : '' };
+    } catch (e) {
+      return { path, status: -1, html: '' };
+    }
+  };
+  const pages = await Promise.all((debug ? PROBE_SOURCES : SUGGEST_SOURCES).map((f) => fetchText(f(q))));
   if (debug) {
-    const links = [...html.matchAll(/href="([^"]*(?:timetable|station)[^"]*)"/g)].slice(0, 15).map((m) => m[1]);
-    return json({ q, status, length: html.length, hasNextData: html.includes('__NEXT_DATA__'), links, items });
+    return json({
+      q,
+      pages: pages.map((pg) => ({ path: decodeURIComponent(pg.path), status: pg.status, length: pg.html.length, ...probePage(pg.html, q), items: parseSuggest(pg.html, q).map((c) => c.value) })),
+    });
   }
+  const seen = new Set();
+  const items = pages.flatMap((pg) => parseSuggest(pg.html, q))
+    .filter((c) => (seen.has(c.value) ? false : seen.add(c.value)))
+    .sort((a, b) => (a.name.startsWith(q) ? 0 : 1) - (b.name.startsWith(q) ? 0 : 1))
+    .slice(0, 12);
+  const html = pages.some((pg) => pg.html);
   const out = json({ items }, 200, { 'cache-control': `public, max-age=${items.length ? 86400 : 600}` });
   if (html) ctx.waitUntil(cache.put(cacheKey, out.clone()));
   return out;

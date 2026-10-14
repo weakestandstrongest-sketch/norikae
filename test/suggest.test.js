@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSuggest, normalizeCandidate, parseAlternatives, suggestPath } from '../src/suggest.js';
+import { parseSuggest, normalizeCandidate, parseAlternatives, suggestPath, probePage } from '../src/suggest.js';
 import { parseResult } from '../src/yahoo.js';
 import { wrap } from './nextdata.js';
 
@@ -46,4 +46,39 @@ test('経路検索ページの「ほかの候補」を読み取る', () => {
   assert.equal(parseAlternatives({ props: { pageProps: {} } }), null);
   const r = parseResult(wrap({ naviSearchParam: { featureInfoList: [], otherQueryInfo: { toList: [{ name: '則武本郷/岐阜バス' }] } } }));
   assert.equal(r.alt.to[0].value, '則武本郷/岐阜バス');
+});
+
+test('キー名が分からないページでも、入力を含む名前を拾う（検索語の繰り返しは除く）', () => {
+  const html = wrap({ query: { q: '則武本郷' }, headline: '則武本郷の時刻表', result: { list: [{ label: '則武本郷/岐阜バス' }, { label: '則武本郷〔岐阜乗合自動車〕' }] } });
+  assert.deepEqual(parseSuggest(html, '則武本郷').map((i) => i.value), ['則武本郷/岐阜バス', '則武本郷/岐阜乗合自動車']);
+});
+
+test('調査用の出力', () => {
+  const html = wrap({ query: { q: '則武本郷' }, list: ['則武本郷/岐阜バス'] });
+  const r = probePage(html, '則武本郷');
+  assert.deepEqual(r.keys, ['query', 'list']);
+  assert.ok(r.hits.includes('則武本郷/岐阜バス'));
+});
+
+test('/api/suggest はいくつかのページをまとめて候補にする', async () => {
+  const { default: worker } = await import('../src/index.js');
+  const saved = { fetch: globalThis.fetch, caches: globalThis.caches };
+  globalThis.caches = { default: { match: async () => null, put: async () => {} } };
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('cont=bus')) return new Response(wrap({ items: [{ name: '則武本郷/岐阜バス' }] }));
+    if (u.includes('/timetable/search')) return new Response(wrap({ q: '則武本郷' }));
+    return new Response('not found', { status: 404 });
+  };
+  try {
+    const ctx = { waitUntil() {} };
+    const res = await worker.fetch(new Request('https://x/api/suggest?q=' + encodeURIComponent('則武本郷')), {}, ctx);
+    assert.deepEqual((await res.json()).items.map((i) => i.value), ['則武本郷/岐阜バス']);
+    const dbg = await (await worker.fetch(new Request('https://x/api/suggest?debug=1&q=' + encodeURIComponent('則武本郷')), {}, ctx)).json();
+    assert.equal(dbg.pages.length, 5);
+    assert.ok(dbg.pages.some((pg) => pg.items.includes('則武本郷/岐阜バス')));
+  } finally {
+    globalThis.fetch = saved.fetch;
+    globalThis.caches = saved.caches;
+  }
 });
