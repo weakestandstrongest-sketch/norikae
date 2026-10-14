@@ -15,6 +15,28 @@
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="style.css">
+  <style>html.hibi-wait body{visibility:hidden}</style>
+  <script>
+    // ひび手帳の中で開いたときは、最初の表示からひび手帳の見た目にする（元の青い画面を一瞬も出さない）
+    (function () {
+      try {
+        if (window.parent === window) return;
+        var p = new URLSearchParams(location.search), cfg = null;
+        if (p.get('embed') === 'hibi') cfg = { theme: p.get('theme'), accent: p.get('accent') };
+        else cfg = JSON.parse(sessionStorage.getItem('norikae:hibi') || 'null');
+        if (!cfg) return;
+        var r = document.documentElement;
+        r.classList.add('hibi', 'hibi-wait');
+        if (cfg.theme === 'dark') r.classList.add('dark');
+        if (/^#[0-9a-f]{6}$/i.test(cfg.accent || '')) r.style.setProperty('--hibi-accent', cfg.accent);
+        var l = document.createElement('link');
+        l.rel = 'stylesheet'; l.href = 'hibi.css?v=17'; l.id = 'hibiCss';
+        l.onload = function () { r.setAttribute('data-hibi-css', 'ok'); };
+        l.onerror = function () { r.setAttribute('data-hibi-css', 'ng'); };
+        document.head.appendChild(l);
+      } catch (e) { /* 通常の見た目で開く */ }
+    })();
+  </script>
 </head>
 <body>
   <header class="topbar">

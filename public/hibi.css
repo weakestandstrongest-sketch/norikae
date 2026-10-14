@@ -1,5 +1,6 @@
 /* Look used when のりかえ is opened inside ひび手帳 (?embed=hibi). Matches ひび手帳's palette, rounded type and soft cards. */
 html.hibi {
+  --hibi-loaded: 1; /* app.js が「ひび手帳の見た目になった」ことをこれで確かめる */
   --bg: #F5EFEB;
   --card: #FFFFFF;
   --text: #232A5C;

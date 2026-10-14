@@ -373,10 +373,27 @@ const HIBI = (() => {
   root.classList.add('hibi');
   if (cfg.theme === 'dark') root.classList.add('dark');
   if (cfg.accent) root.style.setProperty('--hibi-accent', cfg.accent);
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = 'hibi.css';
-  document.head.append(link);
+  let link = document.getElementById('hibiCss'); // index.html の先頭で読み込み済みのはず
+  if (!link) {
+    root.classList.add('hibi-wait');
+    link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'hibi.css?v=17';
+    link.id = 'hibiCss';
+    document.head.append(link);
+  }
+  // ひび手帳の見た目が整ってから画面を見せ、親に「開けた」と知らせる（親はそれまで読み込み中の表示を出している）
+  const tell = (type) => { try { window.parent.postMessage({ type }, cfg.parent || '*'); } catch (e) { /* 親がいない */ } };
+  const ready = () => requestAnimationFrame(() => requestAnimationFrame(() => { root.classList.remove('hibi-wait'); tell('hibi:ready'); }));
+  const styled = () => getComputedStyle(root).getPropertyValue('--hibi-loaded').trim() === '1';
+  const check = () => (styled() ? ready() : tell('hibi:fail'));
+  const state = root.getAttribute('data-hibi-css');
+  if (styled()) setTimeout(ready, 0);
+  else if (state) tell('hibi:fail'); // 読み込みは終わったのに見た目が変わっていない（失敗・古いファイル）
+  else {
+    link.addEventListener('load', check);
+    link.addEventListener('error', () => tell('hibi:fail'));
+  }
   settings.engine = 'app'; // 地図アプリなどへは埋め込みの中から移動できないので、アプリ内検索だけにする
   return cfg;
 })();
