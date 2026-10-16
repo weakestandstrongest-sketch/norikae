@@ -22,6 +22,8 @@ export function buildSearchUrl(params, origin = YAHOO_ORIGIN) {
   const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(get('date'));
   const time = /^(\d{1,2}):(\d{2})$/.exec(get('time'));
   if (!date || !time) throw new InputError('日時の形式が正しくありません');
+  const [mo, dd, hh, mi] = [date[2], date[3], time[1], time[2]].map(Number);
+  if (mo < 1 || mo > 12 || dd < 1 || dd > 31 || hh > 24 || mi > 59) throw new InputError('日時の形式が正しくありません');
 
   const flag = (k) => (get(k) === '0' ? '0' : '1');
   const pick = (k, allowed, def) => (allowed.includes(get(k)) ? get(k) : def);
@@ -38,7 +40,7 @@ export function buildSearchUrl(params, origin = YAHOO_ORIGIN) {
   q.set('hh', pad2(time[1]));
   q.set('m1', time[2][0]);
   q.set('m2', time[2][1]);
-  q.set('type', TYPE_CODE[get('type')] || TYPE_CODE.dep);
+  q.set('type', Object.hasOwn(TYPE_CODE, get('type')) ? TYPE_CODE[get('type')] : TYPE_CODE.dep);
   q.set('ticket', pick('ticket', ['ic', 'normal'], 'ic'));
   q.set('expkind', pick('expkind', ['1', '2', '3'], '1'));
   q.set('userpass', '1');
@@ -60,7 +62,7 @@ export class InputError extends Error {}
 // ---------- HTML 解析 ----------
 
 // 全角英数を半角に、連続する空白を 1 つに
-const clean = (s) => (s || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+const clean = (s) => (s == null ? '' : String(s)).normalize('NFKC').replace(/\s+/g, ' ').trim();
 const text = (el) => (el ? clean(el.textContent) : '');
 const hasClass = (el, name) => !!el.classList && el.classList.contains(name);
 const elementChildren = (el) => el.childNodes.filter((n) => n.nodeType === 1);
@@ -188,8 +190,9 @@ export function extractNextData(html) {
 }
 
 const toNumber = (s) => {
-  const n = Number(String(s || '').replace(/[,円]/g, ''));
-  return Number.isFinite(n) && String(s || '').trim() !== '' ? n : null;
+  if (s == null || String(s).trim() === '') return null; // 数値の 0 は 0 のまま（乗換 0 回など）
+  const n = Number(String(s).replace(/[,円]/g, ''));
+  return Number.isFinite(n) ? n : null;
 };
 const minutesBetween = (a, b) => {
   const m1 = /^(\d{1,2}):(\d{2})$/.exec(a || '');

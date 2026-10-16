@@ -43,12 +43,19 @@ async function handleSearch(request, env, ctx) {
     return json({ error: `Yahoo!乗換案内がエラーを返しました（${res.status}）`, yahooUrl: publicUrl }, 502);
   }
 
-  const { routes, total, alt } = parseResult(await res.text());
+  let parsed;
+  try {
+    parsed = parseResult(await res.text());
+  } catch (e) {
+    return json({ error: 'Yahoo!乗換案内の結果を読み取れませんでした', yahooUrl: publicUrl }, 502);
+  }
+  const { routes, total, alt } = parsed;
   const body = routes.length
     ? { routes, total: total || routes.length, yahooUrl: publicUrl }
     : { routes, yahooUrl: publicUrl, error: '経路が見つかりませんでした。駅名を確認するか、Yahoo で直接開いてください' };
   if (alt) body.alt = alt;
-  const out = json(body, 200, { 'cache-control': 'public, max-age=60' });
+  // 見つからなかったとき（Yahoo の混雑ページなどもここに来る）は、引っ張って更新ですぐ調べ直せるようにブラウザにも残さない
+  const out = json(body, 200, { 'cache-control': routes.length ? 'public, max-age=60' : 'no-store' });
   if (routes.length) ctx.waitUntil(cache.put(cacheKey, out.clone()));
   return out;
 }
@@ -91,7 +98,7 @@ async function handleSuggest(request, env, ctx) {
     .sort((a, b) => (a.name.startsWith(q) ? 0 : 1) - (b.name.startsWith(q) ? 0 : 1))
     .slice(0, 12);
   const html = pages.some((pg) => pg.html);
-  const out = json({ items }, 200, { 'cache-control': `public, max-age=${items.length ? 86400 : 600}` });
+  const out = json({ items }, 200, { 'cache-control': !html ? 'no-store' : `public, max-age=${items.length ? 86400 : 600}` });
   if (html) ctx.waitUntil(cache.put(cacheKey, out.clone()));
   return out;
 }
@@ -143,6 +150,8 @@ async function handleTimetable(request, env, ctx) {
     return json({ error: '時刻表を取得できませんでした' }, 502);
   }
   if (!result) return json({ error: 'この駅の時刻表は見つかりませんでした' }, 404);
+  // 方面のページが 1 つでも読めなかったときは、反対方面の電車を選んでしまうおそれがあるので使わない
+  if (result.failed) return json({ error: '時刻表を取得できませんでした' }, 502);
   const out = json(result, 200, { 'cache-control': 'public, max-age=3600' });
   ctx.waitUntil(cache.put(cacheKey, out.clone()));
   return out;
@@ -183,10 +192,10 @@ async function handleTrain(request, env, ctx) {
 // ひび手帳（GitHub Pages）から経路検索 API を直接呼べるようにする（出発時刻のお知らせ用）
 const HIBI_ORIGIN = /^https:\/\/[a-z0-9-]+\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 function withCors(response, origin) {
-  if (!origin || !HIBI_ORIGIN.test(origin)) return response;
   const res = new Response(response.body, response);
-  res.headers.set('access-control-allow-origin', origin);
+  // 許可しない呼び出し元への応答がキャッシュされて、ひび手帳に渡ってしまわないように常に Vary を付ける
   res.headers.append('vary', 'Origin');
+  if (origin && HIBI_ORIGIN.test(origin)) res.headers.set('access-control-allow-origin', origin);
   return res;
 }
 

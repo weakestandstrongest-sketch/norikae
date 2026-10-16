@@ -92,14 +92,17 @@ export async function lookupTimetable({ code, date, time, line, destination }, f
   if (!groups.length) return null;
 
   const hh = Number(time.split(':')[0]);
+  let failed = false;
   const pages = await Promise.all(groups.map(async (g) => {
     try {
       const tt = parseTimetable(extractNextData(await fetchPage(`/timetable/${code}/${g.groupId}?${dayQuery}&hh=${hh}`)));
       return tt && { ...tt, groupId: g.groupId, direction: tt.direction || g.direction };
     } catch (e) {
+      failed = true;
       return null;
     }
   }));
+  if (failed && !pages.some(Boolean)) throw new Error('timetable pages failed');
 
   // 同じ時刻の電車が反対方面にもあることがあるので、一番よく合う方面を選ぶ
   let chosen = null;
@@ -112,5 +115,7 @@ export async function lookupTimetable({ code, date, time, line, destination }, f
   }
   if (!chosen) chosen = pages.find(Boolean) || null;
   if (!chosen) return null;
+  // 読めなかった方面があるときは、時刻・行き先・種別がすべて合う電車が見つかったときだけ使う
+  if (failed && bestScore < 4) return { failed: true };
   return { ...chosen, matchedIndex };
 }

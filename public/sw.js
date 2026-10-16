@@ -1,5 +1,5 @@
 // オフラインでも画面を開けるよう、アプリ本体だけをキャッシュする
-const CACHE = 'norikae-v21';
+const CACHE = 'norikae-v22';
 const ASSETS = [
   './',
   './index.html',
@@ -33,8 +33,12 @@ self.addEventListener('fetch', (e) => {
   e.respondWith(
     fetch(e.request)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        // エラーのページで正しいファイルを上書きしない。?from=… などの URL ごとに増えないよう、画面は './' として 1 つだけ持つ
+        if (res.ok) {
+          const copy = res.clone();
+          const key = e.request.mode === 'navigate' ? './' : e.request;
+          caches.open(CACHE).then((c) => c.put(key, copy));
+        }
         return res;
       })
       .catch(() => caches.match(e.request, { ignoreSearch: true }))

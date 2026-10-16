@@ -283,6 +283,7 @@ async function fetchRoutes(q, page) {
  */
 async function showResults(q, push, opts = {}) {
   shownQuery = q;
+  if (!opts.soft && $('diaDlg').open) $('diaDlg').close();
   if (push) window.history.pushState({ view: 'result' }, '', resultUrl(q));
   if (!opts.soft) showView('result');
   renderResultHead(q);
@@ -291,7 +292,7 @@ async function showResults(q, push, opts = {}) {
   if (opts.soft) list.classList.add('refreshing');
   else { list.textContent = ''; list.append(el('p', 'loading', '検索中…')); }
   const seq = ++searchSeq;
-  shownRoutes = [];
+  if (!opts.soft) shownRoutes = []; // 引っ張って更新では、新しい結果が来るまで今の結果をそのまま使える
   resultLoading = true;
 
   if (opts.resolve) {
@@ -307,6 +308,13 @@ async function showResults(q, push, opts = {}) {
   const data = await fetchRoutes(q);
   if (seq !== searchSeq) return; // 新しい検索が始まっていたら捨てる
   resultLoading = false;
+  // 引っ張って更新で調べられなかったときは、今の結果を残して知らせるだけにする
+  if (opts.soft && (!data.routes || !data.routes.length) && shownRoutes.length) {
+    list.classList.remove('refreshing');
+    toast(data.error || '更新できませんでした');
+    return;
+  }
+  shownRoutes = [];
 
   list.textContent = '';
   if (list.classList.contains('refreshing')) { list.classList.remove('refreshing'); list.classList.remove('fadein'); void list.offsetWidth; list.classList.add('fadein'); }
@@ -402,6 +410,12 @@ const HIBI = (() => {
   return cfg;
 })();
 
+// 電車が実際に出る日（23:50 に検索して 0:05 発になったときなどは次の日）
+function hibiDepDate(q, dep) {
+  const d = TimeShift.nearDate(dep, TimeShift.anchorFor(q.type, whenToDate(q.when)));
+  return d ? ttDateStr(d) : whenDate(q.when);
+}
+
 function hibiPayload(route) {
   const q = shownQuery || currentQuery();
   const s = route.summary;
@@ -411,7 +425,7 @@ function hibiPayload(route) {
     from: (stations[0] && stations[0].name) || q.from,
     to: (stations[stations.length - 1] && stations[stations.length - 1].name) || q.to,
     via: q.via || '',
-    date: whenDate(q.when),
+    date: hibiDepDate(q, s.dep),
     dep: s.dep,
     arr: s.arr,
     duration: s.duration || '',
@@ -609,6 +623,7 @@ function openDia(routeIndex, stepIndex) {
   if (!stDep) return;
 
   dia = {
+    seq: searchSeq,
     routeIndex,
     stepIndex,
     route,
@@ -788,11 +803,13 @@ async function buildTrainRoute(d, row) {
   if (row.building) return;
   row.building = true;
   row.error = null;
+  d.picked = row; // 続けて別の電車を押したときは、あとから押した方だけを出す
   renderDia();
   try {
     const options = await buildTrainOptions(d, row);
     if (dia !== d) return;
     row.building = false;
+    if (d.picked !== row) { renderDia(); return; }
     if (!options.length) throw new Error('この電車を使う経路が見つかりませんでした');
     d.view = { row, options };
     renderDia();
@@ -1263,6 +1280,7 @@ function renderDia() {
 function chooseDia(e) {
   const d = dia;
   if (!d) return;
+  if (d.seq !== searchSeq) { $('diaDlg').close(); return; } // 戻るなどで別の検索結果に変わっていたら使わない
   const combined = TimeShift.combineRoute(d.route, d.stepIndex, e.route);
   shownRoutes[d.routeIndex] = combined;
   const old = $('resultList').querySelector(`:scope > .route[data-ri="${d.routeIndex}"]`);
@@ -1327,7 +1345,7 @@ function renderList(listEl, emptyEl, items, onDelete) {
     go.addEventListener('click', () => {
       fillRoute(r);
       setType('dep');
-      setNow();
+      if (!(HIBI && HIBI.date)) setNow(); // ひび手帳でカレンダーの日を選んで開いたときは、その日のまま調べる
       search();
     });
     const del = el('button', 'del', '✕');
@@ -1655,7 +1673,7 @@ function setupPullToRefresh() {
   }, { passive: false });
   const end = async () => {
     if (y0 === null) return; y0 = null; cancelAnimationFrame(raf); raf = 0;
-    if (pull < TH || !shownQuery) { pull = 0; paint(0, true); return; }
+    if (pull < TH || !shownQuery || resultLoading) { pull = 0; paint(0, true); return; }
     busy = true; ind.classList.add('spin'); paint(HOLD, true);
     const t0 = Date.now();
     try { await showResults(shownQuery, false, { soft: true }); } catch (e) {}
@@ -1774,6 +1792,7 @@ function init() {
 
   // 結果画面
   $('backBtn').addEventListener('click', () => {
+    searchSeq++; resultLoading = false; // 調べている途中の検索（1 本前・1 本後さがしも）を取り消す
     window.history.pushState(null, '', location.pathname);
     showView('form');
   });
@@ -1782,7 +1801,7 @@ function init() {
   $('favFromResultBtn').addEventListener('click', () => {
     if (shownQuery) addFavorite({ from: shownQuery.from, to: shownQuery.to, via: shownQuery.via });
   });
-  window.addEventListener('popstate', () => routeFromLocation(false));
+  window.addEventListener('popstate', () => { if ($('diaDlg').open) $('diaDlg').close(); routeFromLocation(false); });
 
   const dlg = $('settingsDlg');
   let settingsBefore = '';
@@ -1806,7 +1825,12 @@ function init() {
 
   $('diaClose').addEventListener('click', () => $('diaDlg').close());
   $('diaDlg').addEventListener('close', () => { dia = null; });
-  $('diaDlg').addEventListener('click', (e) => { if (e.target === $('diaDlg')) $('diaDlg').close(); });
+  // 背景（シートの外）を押したときだけ閉じる。シートの端の余白を押しても閉じない
+  $('diaDlg').addEventListener('click', (e) => {
+    if (e.target !== $('diaDlg')) return;
+    const r = $('diaDlg').getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) $('diaDlg').close();
+  });
 
   routeFromLocation(true);
   if (HIBI && HIBI.date && !new URLSearchParams(location.search).get('to')) {
