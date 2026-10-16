@@ -284,12 +284,12 @@ async function fetchRoutes(q, page) {
 async function showResults(q, push, opts = {}) {
   shownQuery = q;
   if (push) window.history.pushState({ view: 'result' }, '', resultUrl(q));
-  showView('result');
+  if (!opts.soft) showView('result');
   renderResultHead(q);
 
   const list = $('resultList');
-  list.textContent = '';
-  list.append(el('p', 'loading', '検索中…'));
+  if (opts.soft) list.classList.add('refreshing');
+  else { list.textContent = ''; list.append(el('p', 'loading', '検索中…')); }
   const seq = ++searchSeq;
   shownRoutes = [];
   resultLoading = true;
@@ -309,6 +309,7 @@ async function showResults(q, push, opts = {}) {
   resultLoading = false;
 
   list.textContent = '';
+  if (list.classList.contains('refreshing')) { list.classList.remove('refreshing'); list.classList.remove('fadein'); void list.offsetWidth; list.classList.add('fadein'); }
   const alt = altCard(q, data.alt);
   if (alt) list.append(alt);
   if (!data.routes || !data.routes.length) {
@@ -1620,30 +1621,41 @@ function setupPullToRefresh() {
   const ind = el('div', 'ptr'); ind.id = 'ptr'; ind.setAttribute('aria-hidden', 'true');
   ind.innerHTML = '<span class="ptr-c"><svg viewBox="0 0 24 24" class="ptr-arrow"><path d="M12 5v13M6.5 12.5 12 18l5.5-5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><i class="ptr-spin"></i></span>';
   document.body.append(ind);
-  const TH = 70; let y0 = null, pull = 0, busy = false;
-  const set = (d, anim) => {
-    ind.style.transition = anim ? 'transform .25s ease, opacity .25s' : 'none';
-    ind.style.transform = `translate(-50%, ${Math.min(d, 110) - 50}px)`;
-    ind.style.opacity = d > 4 ? Math.min(1, d / 40) : 0;
-    ind.classList.toggle('ready', d >= TH);
-    const a = ind.querySelector('.ptr-arrow'); if (a) a.style.transform = `rotate(${d >= TH ? 180 : 0}deg)`;
+  const view = $('resultView'), arrow = ind.querySelector('.ptr-arrow');
+  const TH = 64, HOLD = 56, MAX = 130;
+  let y0 = null, pull = 0, busy = false, raf = 0, ready = false;
+  // the further you pull, the harder it gets (like iPhone's rubber band)
+  const damp = (dy) => MAX * (1 - Math.exp(-dy / (MAX * 1.4)));
+  const paint = (d, anim) => {
+    const tr = anim ? 'transform .42s cubic-bezier(.2,.9,.25,1), opacity .3s' : 'none';
+    view.style.transition = tr; ind.style.transition = tr;
+    view.style.transform = d ? `translate3d(0, ${d.toFixed(1)}px, 0)` : '';
+    ind.style.transform = `translate3d(-50%, ${(Math.min(d, MAX) - 46).toFixed(1)}px, 0)`;
+    ind.style.opacity = d > 6 ? Math.min(1, (d - 6) / 34).toFixed(2) : 0;
+    const r = d >= TH; if (r !== ready) { ready = r; ind.classList.toggle('ready', r); if (r && navigator.vibrate) navigator.vibrate(8); }
+    arrow.style.transform = `rotate(${r ? 180 : 0}deg)`;
   };
   document.addEventListener('touchstart', (e) => {
-    if (busy || $('resultView').hidden || e.touches.length > 1 || window.scrollY > 0 || e.target.closest('dialog')) { y0 = null; return; }
+    if (busy || view.hidden || e.touches.length > 1 || window.scrollY > 0 || e.target.closest('dialog')) { y0 = null; return; }
     y0 = e.touches[0].clientY; pull = 0;
   }, { passive: true });
   document.addEventListener('touchmove', (e) => {
     if (y0 === null) return;
     const dy = e.touches[0].clientY - y0;
-    if (dy <= 0 || window.scrollY > 0) { if (pull) set(0, true); pull = 0; return; }
-    pull = dy * 0.55; set(pull, false);
-  }, { passive: true });
+    if (dy <= 0 || window.scrollY > 0) { if (pull) { pull = 0; paint(0, true); } return; }
+    if (e.cancelable) e.preventDefault(); // our own rubber band instead of the page bouncing as well
+    pull = damp(dy);
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (y0 !== null) paint(pull, false); });
+  }, { passive: false });
   const end = async () => {
-    if (y0 === null) return; y0 = null;
-    if (pull < TH || !shownQuery) { set(0, true); pull = 0; return; }
-    busy = true; ind.classList.add('spin'); set(60, true);
-    try { await showResults(shownQuery, false); } catch (e) {}
-    ind.classList.remove('spin'); busy = false; pull = 0; set(0, true);
+    if (y0 === null) return; y0 = null; cancelAnimationFrame(raf); raf = 0;
+    if (pull < TH || !shownQuery) { pull = 0; paint(0, true); return; }
+    busy = true; ind.classList.add('spin'); paint(HOLD, true);
+    const t0 = Date.now();
+    try { await showResults(shownQuery, false, { soft: true }); } catch (e) {}
+    await new Promise((r) => setTimeout(r, Math.max(0, 450 - (Date.now() - t0)))); // keep the spinner long enough to be seen
+    ind.classList.remove('spin'); pull = 0; paint(0, true);
+    setTimeout(() => { busy = false; view.style.transition = ''; }, 450);
   };
   document.addEventListener('touchend', end); document.addEventListener('touchcancel', end);
 }

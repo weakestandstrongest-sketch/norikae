@@ -503,9 +503,14 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .tl-stop-name { color: var(--text); }
 
 /* 引っ張って更新 */
-.ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 56px); z-index: 30; transform: translate(-50%, -50px); opacity: 0; pointer-events: none; }
+.ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 56px); z-index: 30; transform: translate3d(-50%, -46px, 0); opacity: 0; pointer-events: none; will-change: transform, opacity; }
+#resultView { will-change: transform; }
+#resultList { transition: opacity .25s; }
+#resultList.refreshing { opacity: .45; }
+#resultList.fadein { animation: ptrFade .35s ease both; }
+@keyframes ptrFade { from { opacity: .3; transform: translateY(6px); } }
 .ptr-c { position: relative; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; background: var(--card); color: var(--sub); box-shadow: 0 4px 14px rgba(0,0,0,.18); }
-.ptr-arrow { width: 20px; height: 20px; transition: transform .2s; }
+.ptr-arrow { width: 20px; height: 20px; transition: transform .22s cubic-bezier(.3,1.4,.5,1) !important; }
 .ptr.ready .ptr-c { color: var(--accent); }
 .ptr-spin { display: none; position: absolute; inset: 9px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); animation: ptrSpin .8s linear infinite; }
 .ptr.spin .ptr-arrow { display: none; }
