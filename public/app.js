@@ -1615,6 +1615,39 @@ function saveSettingsForm() {
   renderEngineButtons();
 }
 
+// ---------- 引っ張って更新（検索結果） ----------
+function setupPullToRefresh() {
+  const ind = el('div', 'ptr'); ind.id = 'ptr'; ind.setAttribute('aria-hidden', 'true');
+  ind.innerHTML = '<span class="ptr-c"><svg viewBox="0 0 24 24" class="ptr-arrow"><path d="M12 5v13M6.5 12.5 12 18l5.5-5.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><i class="ptr-spin"></i></span>';
+  document.body.append(ind);
+  const TH = 70; let y0 = null, pull = 0, busy = false;
+  const set = (d, anim) => {
+    ind.style.transition = anim ? 'transform .25s ease, opacity .25s' : 'none';
+    ind.style.transform = `translate(-50%, ${Math.min(d, 110) - 50}px)`;
+    ind.style.opacity = d > 4 ? Math.min(1, d / 40) : 0;
+    ind.classList.toggle('ready', d >= TH);
+    const a = ind.querySelector('.ptr-arrow'); if (a) a.style.transform = `rotate(${d >= TH ? 180 : 0}deg)`;
+  };
+  document.addEventListener('touchstart', (e) => {
+    if (busy || $('resultView').hidden || e.touches.length > 1 || window.scrollY > 0 || e.target.closest('dialog')) { y0 = null; return; }
+    y0 = e.touches[0].clientY; pull = 0;
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (y0 === null) return;
+    const dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || window.scrollY > 0) { if (pull) set(0, true); pull = 0; return; }
+    pull = dy * 0.55; set(pull, false);
+  }, { passive: true });
+  const end = async () => {
+    if (y0 === null) return; y0 = null;
+    if (pull < TH || !shownQuery) { set(0, true); pull = 0; return; }
+    busy = true; ind.classList.add('spin'); set(60, true);
+    try { await showResults(shownQuery, false); } catch (e) {}
+    ind.classList.remove('spin'); busy = false; pull = 0; set(0, true);
+  };
+  document.addEventListener('touchend', end); document.addEventListener('touchcancel', end);
+}
+
 // ---------- トースト ----------
 let toastTimer;
 function toast(msg) {
@@ -1734,7 +1767,16 @@ function init() {
   window.addEventListener('popstate', () => routeFromLocation(false));
 
   const dlg = $('settingsDlg');
-  $('settingsBtn').addEventListener('click', () => { loadSettingsForm(); dlg.showModal(); });
+  let settingsBefore = '';
+  $('settingsBtn').addEventListener('click', () => { loadSettingsForm(); settingsBefore = JSON.stringify(settings); dlg.showModal(); });
+  // 結果を見ているときに設定（新幹線を使わない など）を変えたら、閉じたときに同じ条件で検索し直す
+  dlg.addEventListener('close', () => {
+    if (settingsBefore && JSON.stringify(settings) !== settingsBefore && shownQuery && !$('resultView').hidden) {
+      showResults(shownQuery, false); toast('設定を反映して、検索し直しました');
+    }
+    settingsBefore = '';
+  });
+  setupPullToRefresh();
   dlg.addEventListener('change', saveSettingsForm);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
 
