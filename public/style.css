@@ -516,3 +516,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .ptr.spin .ptr-arrow { display: none; }
 .ptr.spin .ptr-spin { display: block; }
 @keyframes ptrSpin { to { transform: rotate(360deg); } }
+
+/* 前後のダイヤで電車を変えた経路 */
+.route.just-changed { animation: routeFlash 1.6s ease; }
+@keyframes routeFlash { 0%, 30% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }

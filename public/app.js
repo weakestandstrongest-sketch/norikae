@@ -444,6 +444,7 @@ function hibiAddButton(route) {
 function renderRoute(route, index, expanded) {
   const s = route.summary;
   const card = el('article', 'card route');
+  card.dataset.ri = String(index); // 何番目の経路か（上に「もしかして」などのカードがあっても差し替え先を間違えないため）
 
   const head = el('button', 'route-head');
   head.type = 'button';
@@ -1264,9 +1265,14 @@ function chooseDia(e) {
   if (!d) return;
   const combined = TimeShift.combineRoute(d.route, d.stepIndex, e.route);
   shownRoutes[d.routeIndex] = combined;
-  const old = $('resultList').children[d.routeIndex];
-  if (old) old.replaceWith(renderRoute(combined, d.routeIndex, true));
+  const old = $('resultList').querySelector(`:scope > .route[data-ri="${d.routeIndex}"]`);
+  const card = renderRoute(combined, d.routeIndex, true);
+  if (old) old.replaceWith(card);
   $('diaDlg').close();
+  // 変わった経路が見えるようにして、少し光らせる
+  card.classList.add('just-changed');
+  setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  setTimeout(() => card.classList.remove('just-changed'), 1800);
   toast(`${d.st.name} ${e.route.summary.dep}発に変更しました`);
 }
 
