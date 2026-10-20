@@ -189,7 +189,7 @@ async function handleTrain(request, env, ctx) {
   return out;
 }
 
-// ひび手帳（GitHub Pages）から経路検索 API を直接呼べるようにする（出発時刻のお知らせ用）
+// ひび手帳（GitHub Pages）から経路検索・時刻表の API を直接呼べるようにする（出発時刻のお知らせ・別の電車用）
 const HIBI_ORIGIN = /^https:\/\/[a-z0-9-]+\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 function withCors(response, origin) {
   const res = new Response(response.body, response);
@@ -205,8 +205,9 @@ export default {
     if (url.pathname === '/api/search') return withCors(await handleSearch(request, env, ctx), request.headers.get('origin'));
     if (url.pathname === '/api/suggest') return handleSuggest(request, env, ctx);
     if (url.pathname === '/api/nearest') return handleNearest(request);
-    if (url.pathname === '/api/timetable') return handleTimetable(request, env, ctx);
-    if (url.pathname === '/api/train') return handleTrain(request, env, ctx);
+    // ひび手帳の「別の電車」も、前後のダイヤと同じく駅の時刻表から電車を出す
+    if (url.pathname === '/api/timetable') return withCors(await handleTimetable(request, env, ctx), request.headers.get('origin'));
+    if (url.pathname === '/api/train') return withCors(await handleTrain(request, env, ctx), request.headers.get('origin'));
     if (url.pathname === '/api/health') return json({ ok: true });
     // それ以外は public/ の静的ファイル
     return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });

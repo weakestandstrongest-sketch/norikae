@@ -434,7 +434,7 @@ function hibiPayload(route) {
     fareNote: s.fareNote || '',
     tags: s.tags || [],
     steps: route.steps.map((st) => (st.kind === 'station'
-      ? { k: 's', name: st.name, arr: st.arr || '', dep: st.dep || '' }
+      ? { k: 's', name: st.name, arr: st.arr || '', dep: st.dep || '', code: st.code || '' }
       : {
         k: 'a', line: st.line || '', dest: st.destination || '', color: st.color || '', walk: !!st.walk,
         platform: st.platform || '', stops: st.stops || '',
