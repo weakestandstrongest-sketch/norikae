@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<title>乗換案内 ↔ ひび手帳</title>
+<!-- ひび手帳のバックアップ用の小さな窓口。
+     ひび手帳の中で開いた乗換案内の保存データ（お気に入り・履歴・よく使う駅・設定）を、ひび手帳（決まったアドレスだけ）に渡し、
+     バックアップから戻すときは受け取って書き戻す。画面には何も出さない。 -->
+<script>
+(() => {
+  // 渡す相手はひび手帳だけ（ほかのサイトから読まれないように、アドレスを決めておく）
+  const HIBI = /^https:\/\/weakestandstrongest-sketch\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+  const mine = (k) => k.startsWith('norikae:');
+  const read = () => { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && mine(k)) o[k] = localStorage.getItem(k); } return o; };
+  addEventListener('message', (e) => {
+    const m = e.data;
+    if (e.source !== parent || !HIBI.test(e.origin) || !m || typeof m.id !== 'string') return;
+    const reply = (x) => parent.postMessage({ type: 'hibi:bridge', id: m.id, ...x }, e.origin);
+    try {
+      if (m.type === 'hibi:get') reply({ ok: true, data: read() });
+      else if (m.type === 'hibi:put' && m.data && typeof m.data === 'object') {
+        for (const k of Object.keys(read())) localStorage.removeItem(k);
+        for (const [k, v] of Object.entries(m.data)) if (mine(k) && typeof v === 'string') localStorage.setItem(k, v);
+        reply({ ok: true });
+      }
+    } catch (err) { reply({ ok: false, error: String(err && err.message || err) }); }
+  });
+})();
+</script>

@@ -1,5 +1,5 @@
 // オフラインでも画面を開けるよう、アプリ本体だけをキャッシュする
-const CACHE = 'norikae-v23';
+const CACHE = 'norikae-v24';
 const ASSETS = [
   './',
   './index.html',
@@ -30,6 +30,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.startsWith('/api/')) return; // 検索結果はキャッシュしない
+  if (url.pathname.endsWith('/hibi-bridge.html')) return; // ひび手帳のバックアップ用の窓口：画面（'./'）として覚えないように
   e.respondWith(
     fetch(e.request)
       .then((res) => {
