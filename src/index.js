@@ -3,6 +3,7 @@ import { parseCoords, findNearest, findAddress } from './nearest.js';
 import { lookupTimetable } from './timetable.js';
 import { parseTrainPage } from './train.js';
 import { SUGGEST_SOURCES, PROBE_SOURCES, parseSuggest, probePage } from './suggest.js';
+import { handleHibiAuth } from './hibiauth.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 
@@ -209,6 +210,8 @@ export default {
     if (url.pathname === '/api/timetable') return withCors(await handleTimetable(request, env, ctx), request.headers.get('origin'));
     if (url.pathname === '/api/train') return withCors(await handleTrain(request, env, ctx), request.headers.get('origin'));
     if (url.pathname === '/api/health') return json({ ok: true });
+    // ひび手帳の「Googleドライブに自動保存」のログイン
+    if (url.pathname.startsWith('/hibi-auth/')) return handleHibiAuth(request, env);
     // それ以外は public/ の静的ファイル
     return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
   },
