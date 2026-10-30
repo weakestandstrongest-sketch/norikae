@@ -88,6 +88,7 @@ Yahoo!乗換案内のページ構成が変わると解析できなくなるこ�
 ## ひび手帳の「Googleドライブに自動保存」のログイン（/hibi-auth/）
 
 ひび手帳が Google にログインするための窓口です（Google の秘密の鍵を iPhone に置かないため）。何も保存しません。
+ひび手帳・move（`https://weakestandstrongest-sketch.github.io`）と、同じ Cloudflare アカウントの home（`https://ie.<同じサブドメイン>.workers.dev`）からだけ使えます。
 
 1. https://console.cloud.google.com/ でプロジェクトを作る
 2. 「API とサービス → ライブラリ」で **Google Drive API** を有効にする

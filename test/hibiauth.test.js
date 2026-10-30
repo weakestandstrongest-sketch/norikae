@@ -53,3 +53,24 @@ test('設定がまだのときは、ひび手帳にそう伝える', async () =>
   const r = await call('/hibi-auth/start?ret=' + encodeURIComponent(HIBI + '/day/'), {}, {});
   assert.ok(r.headers.get('location').includes('gauth_err=setup'));
 });
+
+test('同じアカウントの home（ie.<同じサブドメイン>.workers.dev）にはログインの結果を返し、ほかの人の ie には返さない', async () => {
+  const HOME = 'https://ie.example.workers.dev';
+  const r1 = await call('/hibi-auth/start?ret=' + encodeURIComponent(HOME + '/') + '&s=xyz');
+  assert.equal(r1.status, 302);
+  const g = new URL(r1.headers.get('location'));
+  const r2 = await call('/hibi-auth/cb?code=C&state=' + g.searchParams.get('state'));
+  assert.equal(new URL(r2.headers.get('location')).origin, HOME);
+  const p = JSON.parse(Buffer.from(new URLSearchParams(new URL(r2.headers.get('location')).hash.slice(1)).get('gauth'), 'base64url').toString());
+  const r3 = await call('/hibi-auth/token', { method: 'POST', headers: { origin: HOME, 'content-type': 'application/json' }, body: JSON.stringify({ rt: p.rt }) });
+  assert.equal(r3.status, 200);
+  assert.equal(r3.headers.get('access-control-allow-origin'), HOME);
+  const pre = await call('/hibi-auth/token', { method: 'OPTIONS', headers: { origin: HOME } });
+  assert.equal(pre.headers.get('access-control-allow-origin'), HOME);
+
+  // ほかの人のサブドメインの ie・似た名前は使えない
+  for (const bad of ['https://ie.someone-else.workers.dev', 'https://ie2.example.workers.dev', 'https://ie.example.workers.dev.evil.com']) {
+    assert.equal((await call('/hibi-auth/start?ret=' + encodeURIComponent(bad + '/'))).status, 400, bad);
+    assert.equal((await call('/hibi-auth/token', { method: 'POST', headers: { origin: bad }, body: JSON.stringify({ rt: p.rt }) })).status, 403, bad);
+  }
+});

@@ -6,6 +6,12 @@
 
 // ひび手帳の置き場所だけ（ほかのサイトにはログインの結果を渡さない）
 const RET_ORIGIN = /^https:\/\/weakestandstrongest-sketch\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+// 同じ Cloudflare アカウントの home（帰る）アプリ：ie.<同じサブドメイン>.workers.dev だけ（ほかの人の ie.〇〇 には渡さない）
+const homeOrigin = (request) => {
+  const m = /^[a-z0-9-]+\.([a-z0-9-]+\.workers\.dev)$/i.exec(new URL(request.url).hostname);
+  return m ? `https://ie.${m[1]}` : '';
+};
+const originOk = (origin, request) => !!origin && (RET_ORIGIN.test(origin) || origin.toLowerCase() === homeOrigin(request));
 const SCOPE = 'openid email https://www.googleapis.com/auth/drive.appdata';
 const GOOGLE_AUTH = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
@@ -31,14 +37,14 @@ export async function unseal(env, s) {
   return dec.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, await key(env), b.slice(12)));
 }
 
-function retOk(ret) {
-  try { const u = new URL(ret); return RET_ORIGIN.test(u.origin) ? u : null; } catch { return null; }
+function retOk(ret, request) {
+  try { const u = new URL(ret); return originOk(u.origin, request) ? u : null; } catch { return null; }
 }
 const cbURL = (request) => new URL('/hibi-auth/cb', request.url).toString();
 const back = (ret, hash) => { const u = new URL(ret); u.hash = hash; return Response.redirect(u.toString(), 302); };
-const cors = (res, origin) => {
+const cors = (res, origin, request) => {
   res.headers.append('vary', 'Origin');
-  if (origin && RET_ORIGIN.test(origin)) { res.headers.set('access-control-allow-origin', origin); res.headers.set('access-control-allow-headers', 'content-type'); res.headers.set('access-control-allow-methods', 'POST, OPTIONS'); }
+  if (originOk(origin, request)) { res.headers.set('access-control-allow-origin', origin); res.headers.set('access-control-allow-headers', 'content-type'); res.headers.set('access-control-allow-methods', 'POST, OPTIONS'); }
   res.headers.set('cache-control', 'no-store');
   return res;
 };
@@ -48,11 +54,11 @@ export async function handleHibiAuth(request, env) {
   const url = new URL(request.url), origin = request.headers.get('origin');
   const path = url.pathname.slice('/hibi-auth'.length);
   const ready = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
-  if (request.method === 'OPTIONS') return cors(new Response(null, { status: 204 }), origin);
+  if (request.method === 'OPTIONS') return cors(new Response(null, { status: 204 }), origin, request);
 
   // 1. ひび手帳から来る → Google のログイン画面へ
   if (path === '/start') {
-    const ret = retOk(url.searchParams.get('ret'));
+    const ret = retOk(url.searchParams.get('ret'), request);
     if (!ret) return new Response('ひび手帳からのみ使えます', { status: 400 });
     if (!ready) return back(ret.toString(), 'gauth_err=setup');
     const state = b64u(enc.encode(JSON.stringify({ ret: ret.toString(), s: String(url.searchParams.get('s') || '').slice(0, 64) })));
@@ -64,7 +70,7 @@ export async function handleHibiAuth(request, env) {
   // 2. Google から戻る → 鍵を受け取り、暗号にしてひび手帳へ返す
   if (path === '/cb') {
     let st; try { st = JSON.parse(dec.decode(unb64u(url.searchParams.get('state') || ''))); } catch { st = null; }
-    const ret = st && retOk(st.ret);
+    const ret = st && retOk(st.ret, request);
     if (!ret) return new Response('ひび手帳からのみ使えます', { status: 400 });
     const tag = `&s=${encodeURIComponent(st.s || '')}`;
     if (url.searchParams.get('error')) return back(ret.toString(), `gauth_err=${encodeURIComponent(url.searchParams.get('error'))}${tag}`);
@@ -80,22 +86,22 @@ export async function handleHibiAuth(request, env) {
 
   // 3. ひび手帳がドライブに書く前に、短い鍵（1時間）をもらう
   if (path === '/token' && request.method === 'POST') {
-    if (!origin || !RET_ORIGIN.test(origin)) return jsonRes({ error: 'origin' }, 403);
-    if (!ready) return cors(jsonRes({ error: 'setup' }, 503), origin);
+    if (!originOk(origin, request)) return jsonRes({ error: 'origin' }, 403);
+    if (!ready) return cors(jsonRes({ error: 'setup' }, 503), origin, request);
     const body = await request.json().catch(() => ({}));
-    let rt; try { rt = await unseal(env, body.rt); } catch { return cors(jsonRes({ error: 'revoked' }, 401), origin); }
+    let rt; try { rt = await unseal(env, body.rt); } catch { return cors(jsonRes({ error: 'revoked' }, 401), origin, request); }
     const r = await fetch(GOOGLE_TOKEN, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ refresh_token: rt, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, grant_type: 'refresh_token' }) });
     const t = await r.json().catch(() => ({}));
-    if (!r.ok || !t.access_token) return cors(jsonRes({ error: t.error === 'invalid_grant' ? 'revoked' : 'google' }, t.error === 'invalid_grant' ? 401 : 502), origin);
-    return cors(jsonRes({ at: t.access_token, exp: Date.now() + (t.expires_in || 3600) * 1000 }), origin);
+    if (!r.ok || !t.access_token) return cors(jsonRes({ error: t.error === 'invalid_grant' ? 'revoked' : 'google' }, t.error === 'invalid_grant' ? 401 : 502), origin, request);
+    return cors(jsonRes({ at: t.access_token, exp: Date.now() + (t.expires_in || 3600) * 1000 }), origin, request);
   }
 
   // 4. ログアウト：Google 側の許可も取り消す
   if (path === '/revoke' && request.method === 'POST') {
-    if (!origin || !RET_ORIGIN.test(origin)) return jsonRes({ error: 'origin' }, 403);
+    if (!originOk(origin, request)) return jsonRes({ error: 'origin' }, 403);
     const body = await request.json().catch(() => ({}));
     try { const rt = await unseal(env, body.rt); await fetch(`${GOOGLE_REVOKE}?token=${encodeURIComponent(rt)}`, { method: 'POST' }); } catch {}
-    return cors(jsonRes({ ok: true }), origin);
+    return cors(jsonRes({ ok: true }), origin, request);
   }
   return new Response('Not found', { status: 404 });
 }
