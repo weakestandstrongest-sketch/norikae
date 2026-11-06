@@ -7,5 +7,8 @@
     "directory": "./public",
     "binding": "ASSETS"
   },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // ひび手帳の通知の中継（src/push.js）。宛先ごとに時刻の一覧を持ってアラームで Push を送る
+  "durable_objects": { "bindings": [{ "name": "HIBI_PUSH", "class_name": "HibiPush" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HibiPush"] }]
 }

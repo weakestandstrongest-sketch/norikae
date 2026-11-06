@@ -5,6 +5,9 @@ import { parseTrainPage } from './train.js';
 import { SUGGEST_SOURCES, PROBE_SOURCES, parseSuggest, probePage } from './suggest.js';
 import { handleHibiAuth } from './hibiauth.js';
 import { parsePoint, findRoad } from './road.js';
+import { handleHibiPush, HibiPush } from './push.js';
+
+export { HibiPush };
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 
@@ -233,6 +236,8 @@ export default {
     if (url.pathname === '/api/health') return json({ ok: true });
     // ひび手帳の「Googleドライブに自動保存」のログイン
     if (url.pathname.startsWith('/hibi-auth/')) return handleHibiAuth(request, env);
+    // ひび手帳の通知（時刻だけを預かって、その時刻に Push を送る）
+    if (url.pathname.startsWith('/hibi-push/')) return handleHibiPush(request, env);
     // それ以外は public/ の静的ファイル
     return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
   },
