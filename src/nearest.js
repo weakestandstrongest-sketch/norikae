@@ -41,6 +41,39 @@ export async function findNearest(coords, fetchImpl = fetch) {
   throw lastError;
 }
 
+// ---------- 駅名 → 緯度経度（ひび手帳の MOVE：予定に入れた電車の区間を、駅を結んだ線で描くため） ----------
+// 「岐阜(JR)」「名鉄岐阜駅」のような書き方は、括弧と「駅」を外して探す
+export const stationKey = (name) => String(name || '').normalize('NFKC').replace(/[(（][^)）]*[)）]/g, '').replace(/駅$/, '').trim().slice(0, 40);
+
+// 同じ名前の駅（路線ごと・別の県）の場所をまとめる。近い場所は1つにする（同じ駅の別の路線）
+export function stationPlaces(json) {
+  const list = (json && json.response && json.response.station) || [], out = [];
+  for (const st of list) {
+    const lat = Number(st && st.y), lng = Number(st && st.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const same = out.find((p) => Math.abs(p.lat - lat) < 0.01 && Math.abs(p.lng - lng) < 0.01);
+    if (same) { if (st.line && !same.lines.includes(st.line)) same.lines.push(st.line); continue; }
+    out.push({ name: st.name, lat, lng, prefecture: st.prefecture || '', lines: st.line ? [st.line] : [] });
+  }
+  return out.slice(0, 10);
+}
+
+export async function findStation(name, fetchImpl = fetch) {
+  const key = stationKey(name);
+  if (!key) return [];
+  let lastError;
+  for (const base of ENDPOINTS) {
+    try {
+      const res = await fetchImpl(`${base}?method=getStations&name=${encodeURIComponent(key)}`, { headers: { accept: 'application/json' }, cf: { cacheTtl: 86400 * 7, cacheEverything: true } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return stationPlaces(await res.json());
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
 // ---------- 緯度経度 → 住所 ----------
 // 国土地理院の逆ジオコーダー（市区町村コード＋町名）を使い、
 // 市区町村名は地理院地図の muni.js の対応表で引く。失敗したら HeartRails Geo API を使う。
