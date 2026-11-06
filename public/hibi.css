@@ -12,14 +12,14 @@ html.hibi {
   --shadow: 0 6px 22px rgba(35, 42, 92, .08);
 }
 html.hibi.dark {
-  --bg: #141414;
-  --card: #252526;
+  --bg: #000000;
+  --card: #1C1C1D;
   --text: #F2F1F4;
   --sub: #A3A3AD;
   --line: #303034;
   --accent: var(--hibi-accent, #EF8A82);
   --accent-text: #1A1414;
-  --field: #1C1C1D;
+  --field: #2C2C2E;
   --shadow: none;
   color-scheme: dark;
 }

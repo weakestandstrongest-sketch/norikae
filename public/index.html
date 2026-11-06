@@ -30,7 +30,7 @@
         if (cfg.theme === 'dark') r.classList.add('dark');
         if (/^#[0-9a-f]{6}$/i.test(cfg.accent || '')) r.style.setProperty('--hibi-accent', cfg.accent);
         var l = document.createElement('link');
-        l.rel = 'stylesheet'; l.href = 'hibi.css?v=18'; l.id = 'hibiCss';
+        l.rel = 'stylesheet'; l.href = 'hibi.css?v=19'; l.id = 'hibiCss';
         l.onload = function () { r.setAttribute('data-hibi-css', 'ok'); };
         l.onerror = function () { r.setAttribute('data-hibi-css', 'ng'); };
         document.head.appendChild(l);

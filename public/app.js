@@ -390,7 +390,7 @@ const HIBI = (() => {
     root.classList.add('hibi-wait');
     link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = 'hibi.css?v=18';
+    link.href = 'hibi.css?v=19';
     link.id = 'hibiCss';
     document.head.append(link);
   }
