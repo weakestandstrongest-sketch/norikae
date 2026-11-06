@@ -4,6 +4,7 @@ import { lookupTimetable } from './timetable.js';
 import { parseTrainPage } from './train.js';
 import { SUGGEST_SOURCES, PROBE_SOURCES, parseSuggest, probePage } from './suggest.js';
 import { handleHibiAuth } from './hibiauth.js';
+import { parsePoint, findRoad } from './road.js';
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 
@@ -119,6 +120,16 @@ async function handleNearest(request) {
   return json(body);
 }
 
+// 2地点の間の道（ひび手帳・move の MOVE で、記録が少ない日の線を道に沿わせるため）
+async function handleRoad(request) {
+  const p = new URL(request.url).searchParams, a = parsePoint(p.get('from')), b = parsePoint(p.get('to')), mode = p.get('mode') || 'foot';
+  if (!a || !b || !['foot', 'bike', 'car'].includes(mode)) return json({ error: '値が正しくありません' }, 400);
+  try {
+    const r = await findRoad(mode, a, b);
+    return json(r || { coords: [], distance: 0 }, 200, { 'cache-control': 'public, max-age=2592000' });
+  } catch { return json({ error: '道を調べられませんでした' }, 502); }
+}
+
 // 駅名から駅の場所（ひび手帳の MOVE で、予定に入れた電車の区間を描くため）。駅の場所は変わらないので1日キャッシュ
 async function handleStation(request) {
   const name = new URL(request.url).searchParams.get('name') || '';
@@ -217,6 +228,7 @@ export default {
     // ひび手帳の「別の電車」も、前後のダイヤと同じく駅の時刻表から電車を出す
     if (url.pathname === '/api/timetable') return withCors(await handleTimetable(request, env, ctx), request.headers.get('origin'));
     if (url.pathname === '/api/train') return withCors(await handleTrain(request, env, ctx), request.headers.get('origin'));
+    if (url.pathname === '/api/road') return withCors(await handleRoad(request), request.headers.get('origin'));
     if (url.pathname === '/api/station') return withCors(await handleStation(request), request.headers.get('origin'));
     if (url.pathname === '/api/health') return json({ ok: true });
     // ひび手帳の「Googleドライブに自動保存」のログイン
