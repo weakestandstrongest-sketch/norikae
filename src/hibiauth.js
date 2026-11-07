@@ -5,7 +5,10 @@
 //   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
 
 // ひび手帳の置き場所だけ（ほかのサイトにはログインの結果を渡さない）
-const RET_ORIGIN = /^https:\/\/weakestandstrongest-sketch\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+// capacitor://localhost = ひび手帳の iOS アプリ版（Capacitor）の中の住所
+const RET_ORIGIN = /^https:\/\/weakestandstrongest-sketch\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^capacitor:\/\/localhost$/i;
+// iOS アプリ版は、ログインのあと Safari からこのアプリ専用の住所で戻ってくる（Info.plist に登録した URL スキーム）
+const APP_RET = /^jp\.weakestandstrongest\.hibi:\/\/auth\/?$/;
 // 同じ Cloudflare アカウントの home（帰る）アプリ：ie.<同じサブドメイン>.workers.dev だけ（ほかの人の ie.〇〇 には渡さない）
 const homeOrigin = (request) => {
   const m = /^[a-z0-9-]+\.([a-z0-9-]+\.workers\.dev)$/i.exec(new URL(request.url).hostname);
@@ -38,7 +41,7 @@ export async function unseal(env, s) {
 }
 
 function retOk(ret, request) {
-  try { const u = new URL(ret); return originOk(u.origin, request) ? u : null; } catch { return null; }
+  try { const u = new URL(ret); if (APP_RET.test(`${u.protocol}//${u.host}${u.pathname}`) && !u.search && !u.hash) return u; return originOk(u.origin, request) ? u : null; } catch { return null; }
 }
 const cbURL = (request) => new URL('/hibi-auth/cb', request.url).toString();
 const back = (ret, hash) => { const u = new URL(ret); u.hash = hash; return Response.redirect(u.toString(), 302); };

@@ -32,3 +32,9 @@ test('同じサイトからの検索（Origin なし）はそのまま', async (
   assert.equal(res.headers.get('access-control-allow-origin'), null);
   assert.equal(res.status, 200);
 });
+
+test('ひび手帳の iOS アプリ版（capacitor://localhost）からの検索にも CORS ヘッダーを付ける', async () => {
+  const res = await search('capacitor://localhost');
+  assert.equal(res.headers.get('access-control-allow-origin'), 'capacitor://localhost');
+  assert.equal((await search('capacitor://evil')).headers.get('access-control-allow-origin'), null);
+});

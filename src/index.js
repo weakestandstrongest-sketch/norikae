@@ -213,7 +213,8 @@ async function handleTrain(request, env, ctx) {
 }
 
 // ひび手帳（GitHub Pages）から経路検索・時刻表の API を直接呼べるようにする（出発時刻のお知らせ・別の電車用）
-const HIBI_ORIGIN = /^https:\/\/[a-z0-9-]+\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+// capacitor://localhost = ひび手帳の iOS アプリ版（Capacitor）
+const HIBI_ORIGIN = /^https:\/\/[a-z0-9-]+\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^capacitor:\/\/localhost$/i;
 function withCors(response, origin) {
   const res = new Response(response.body, response);
   // 許可しない呼び出し元への応答がキャッシュされて、ひび手帳に渡ってしまわないように常に Vary を付ける

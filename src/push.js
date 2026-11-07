@@ -96,7 +96,7 @@ export class HibiPush {
 }
 
 // ---------- 窓口（ひび手帳から呼ぶ） ----------
-const ORIGIN = /^https:\/\/weakestandstrongest-sketch\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+const ORIGIN = /^https:\/\/weakestandstrongest-sketch\.github\.io$|^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$|^capacitor:\/\/localhost$/i;
 const subId = async (env, endpoint) => env.HIBI_PUSH.idFromName('s:' + b64u(await crypto.subtle.digest('SHA-256', enc.encode(endpoint))));
 export async function handleHibiPush(request, env) {
   const origin = request.headers.get('origin') || '', ok = ORIGIN.test(origin);

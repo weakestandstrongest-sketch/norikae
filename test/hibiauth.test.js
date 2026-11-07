@@ -74,3 +74,23 @@ test('同じアカウントの home（ie.<同じサブドメイン>.workers.dev�
     assert.equal((await call('/hibi-auth/token', { method: 'POST', headers: { origin: bad }, body: JSON.stringify({ rt: p.rt }) })).status, 403, bad);
   }
 });
+
+test('iOS アプリ版：アプリ専用の住所に戻し、capacitor://localhost からの呼び出しを受け付ける', async () => {
+  const APP = 'jp.weakestandstrongest.hibi://auth/';
+  const r1 = await call('/hibi-auth/start?ret=' + encodeURIComponent(APP) + '&s=app1');
+  assert.equal(r1.status, 302);
+  const g = new URL(r1.headers.get('location'));
+  const r2 = await call('/hibi-auth/cb?code=C&state=' + g.searchParams.get('state'));
+  const loc = r2.headers.get('location');
+  assert.ok(loc.startsWith(APP + '#'), loc);
+  const h = new URLSearchParams(loc.slice(loc.indexOf('#') + 1));
+  assert.equal(h.get('s'), 'app1');
+  const p = JSON.parse(Buffer.from(h.get('gauth'), 'base64url').toString());
+  const r3 = await call('/hibi-auth/token', { method: 'POST', headers: { origin: 'capacitor://localhost', 'content-type': 'application/json' }, body: JSON.stringify({ rt: p.rt }) });
+  assert.equal(r3.status, 200); assert.equal(r3.headers.get('access-control-allow-origin'), 'capacitor://localhost');
+  // 似た住所・ほかのアプリの住所には返さない
+  for (const bad of ['jp.weakestandstrongest.hibi://evil/', 'jp.weakestandstrongest.hibi.evil://auth/', 'other.app://auth/', 'jp.weakestandstrongest.hibi://auth/x', 'jp.weakestandstrongest.hibi://auth/?next=https://evil.com']) {
+    assert.equal((await call('/hibi-auth/start?ret=' + encodeURIComponent(bad) + '&s=x')).status, 400, bad);
+  }
+  assert.equal((await call('/hibi-auth/token', { method: 'POST', headers: { origin: 'capacitor://evil' }, body: JSON.stringify({ rt: p.rt }) })).status, 403);
+});
