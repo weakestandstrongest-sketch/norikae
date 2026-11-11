@@ -1,5 +1,5 @@
 // オフラインでも画面を開けるよう、アプリ本体だけをキャッシュする
-const CACHE = 'norikae-v28';
+const CACHE = 'norikae-v29';
 const ASSETS = [
   './',
   './index.html',

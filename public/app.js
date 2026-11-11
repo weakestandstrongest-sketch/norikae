@@ -586,7 +586,7 @@ function xCountdown() {
   b.className = 'x-badge';
   if (left < -1) { b.textContent = ''; }
   else if (left <= 0) { b.textContent = '今すぐ出発'; b.classList.add('now'); }
-  else { b.textContent = left >= 60 * 24 ? '' : left >= 60 ? `あと${Math.floor(left / 60)}時間${left % 60}分` : `あと${left}分`; if (left <= 3) b.classList.add('now'); }
+  else { b.textContent = left >= 60 * 24 ? '' : left >= 60 ? `あと${Math.floor(left / 60)}時間${left % 60}分で出発` : `あと${left}分で出発`; if (left <= 3) b.classList.add('now'); }
 }
 
 function renderResultBody(animate) {
@@ -598,11 +598,13 @@ function renderResultBody(animate) {
   const route = shownRoutes[selRoute], s = route.summary;
   const depAt = xDepDate(q, s.dep), arrAt = depAt && xDepDate({ when: { y: depAt.getFullYear(), mo: depAt.getMonth() + 1, d: depAt.getDate(), h: depAt.getHours(), mi: depAt.getMinutes() } }, s.arr);
   const wrap = el('section', 'x-result' + (animate ? ' enter' : ''));
-  // 着く時刻（大きく）と、出る時刻・残り時間
+  // 出る時刻 → 着く時刻（大きく。いつ出ればいいかがすぐわかる）と、出発までの残り時間
   const sum = el('div', 'x-summary');
-  const eb = el('p', 'x-eyebrow', `${xPlace(q.to)}に着くのは`); const ad = xDayLabel(arrAt); if (ad) eb.append(el('span', 'day', ad));
-  sum.append(eb, el('p', 'x-arrive', s.arr || '--:--'));
-  const leave = el('p', 'x-leave', s.dep ? `${xDayLabel(depAt)}${s.dep} に${xPlace(q.from)}を出発` : '');
+  const eb = el('p', 'x-eyebrow', '出発 → 到着'); const dd = xDayLabel(depAt); if (dd) eb.append(el('span', 'day', dd));
+  const big = el('p', 'x-arrive x-range'); big.append(s.dep || '--:--', el('span', 'arw', '→'), s.arr || '--:--');
+  const ad = xDayLabel(arrAt); if (ad && ad !== dd) big.append(el('small', null, ad));
+  sum.append(eb, big);
+  const leave = el('p', 'x-leave');
   const badge = el('span', 'x-badge'); badge.dataset.at = depAt ? String(depAt.getTime()) : ''; leave.append(badge);
   sum.append(leave);
   const facts = el('ul', 'x-facts'), fact = (v, cls) => { const li = el('li', cls || null); li.append(el('b', null, v)); facts.append(li); };
