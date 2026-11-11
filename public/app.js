@@ -318,6 +318,7 @@ async function showResults(q, push, opts = {}) {
 
   list.textContent = '';
   if (list.classList.contains('refreshing')) { list.classList.remove('refreshing'); list.classList.remove('fadein'); void list.offsetWidth; list.classList.add('fadein'); }
+  resAlt = data.alt || null; resMore = null; selRoute = 0; expandedRides.clear();
   const alt = altCard(q, data.alt);
   if (alt) list.append(alt);
   if (!data.routes || !data.routes.length) {
@@ -331,9 +332,9 @@ async function showResults(q, push, opts = {}) {
     return;
   }
   shownRoutes = data.routes;
-  data.routes.forEach((r, i) => list.append(renderRoute(r, i, i === 0)));
   rememberStations(data.routes);
-  if (data.total > data.routes.length) list.append(moreRoutesButton(q, seq, 2, data.total));
+  if (data.total > data.routes.length) resMore = { q, seq, page: 2, total: data.total };
+  renderResultBody(true);
 }
 
 // Yahoo は 1 ページに 3 ルート。「ほかのルート」で 4 件目以降を読み足す
@@ -348,16 +349,9 @@ function moreRoutesButton(q, seq, page, total) {
     const routes = (data.routes || []).filter((r) => !shownRoutes.some((s) =>
       s.summary.dep === r.summary.dep && s.summary.arr === r.summary.arr && s.steps.length === r.steps.length));
     if (!routes.length) { b.remove(); toast('ほかのルートはありませんでした'); return; }
-    const list = $('resultList');
-    routes.forEach((r) => {
-      shownRoutes.push(r);
-      list.insertBefore(renderRoute(r, shownRoutes.length - 1, false), b);
-    });
-    if (page < 3 && total > page * 3) {
-      b.replaceWith(moreRoutesButton(q, seq, page + 1, total));
-    } else {
-      b.remove();
-    }
+    routes.forEach((r) => shownRoutes.push(r));
+    resMore = page < 3 && total > page * 3 ? { q, seq, page: page + 1, total } : null;
+    renderResultBody(false);
   });
   return b;
 }
@@ -444,15 +438,212 @@ function hibiPayload(route) {
 }
 
 function hibiAddButton(route) {
-  const b = el('button', 'hibi-add', '＋ ひび手帳のタイムラインに追加');
+  const b = el('button', 'hibi-add');
   b.type = 'button';
+  b.innerHTML = '<span class="hibi-ico"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M4 10h16M12 13v5M9.5 15.5h5"/></svg></span><span class="hibi-label"><b>ひび手帳に追加</b><small>この経路をタイムラインの予定に入れます</small></span>';
   b.addEventListener('click', (e) => {
     e.stopPropagation();
     window.parent.postMessage({ type: 'hibi:addRoute', route: hibiPayload(route) }, HIBI.parent || '*');
     b.disabled = true;
-    b.textContent = '追加しました';
+    const lb = b.querySelector('.hibi-label b'); if (lb) lb.textContent = '追加しました'; else b.textContent = '追加しました';
   });
   return b;
+}
+
+
+// ---------- 結果の見せ方（ie と同じ形） ----------
+// 大きな到着時刻・出発までの残り時間・数字のチップ、経路は色つきのカプセルを点線でつなぐタイムライン、
+// ほかのルートは下に1行ずつ。機能（前後のダイヤ・途中の駅・乗り継ぎの変更・ひび手帳に追加・ほかのルートの読み足し）はそのまま
+let selRoute = 0, resAlt = null, resMore = null;
+const expandedRides = new Set();
+const X_ICONS = {
+  pin: '<svg viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>',
+  walk: '<svg viewBox="0 0 24 24"><circle class="solid" cx="13" cy="4.2" r="1.9"/><path d="M9.5 21l2.2-6.2M11.7 14.8l2.6 2.4.9 3.8M8 11.4l2.4-3.2 3.4.6 1.4 3 2.6 1.2M10.4 8.2l1.3 6.6"/></svg>',
+  train: '<svg viewBox="0 0 24 24"><rect x="5.5" y="3.5" width="13" height="14" rx="4"/><path d="M5.5 10.5h13M9 14.3h.01M15 14.3h.01M8.5 21l1.8-3.5M15.5 21l-1.8-3.5"/></svg>',
+  bus: '<svg viewBox="0 0 24 24"><rect x="4.5" y="3.5" width="15" height="14" rx="3"/><path d="M4.5 11h15M8.2 14.5h.01M15.8 14.5h.01M7.5 17.5V20M16.5 17.5V20"/></svg>',
+  flag: '<svg viewBox="0 0 24 24"><path d="M6 21V4"/><path class="solid" d="M6 4.5h11.5l-2.6 4 2.6 4H6z"/></svg>',
+  plane: '<svg viewBox="0 0 24 24"><path d="M10.5 21l2-6.5L5 12.5V11l7.5.5L14 4.5h1.5l-.5 7.5 5 1v1.5l-5 .5 1.5 5H15l-2.5-3.5"/></svg>',
+};
+const X_COLOR = { start: 'var(--ink)', walk: 'var(--walk)', end: 'var(--accent)', ride: 'var(--accent)' };
+const xMix = (a, b) => `color-mix(in srgb, ${a} 50%, ${b})`;
+const xPlace = (s) => String(s || '').replace(/\/[^/]*$/, '');
+const xMin = (t) => { const m = /^(\d{1,2}):(\d{2})/.exec(t || ''); return m ? +m[1] * 60 + +m[2] : null; };
+const xDiff = (a, b) => { const x = xMin(a), y = xMin(b); if (x == null || y == null) return null; let d = y - x; if (d < -600) d += 1440; return d; };
+const xDur = (d) => (d || '').replace(/\(.*?\)/g, '').trim();
+function xPlatform(p) { const m = /\[発\]\s*([^\s→]+)/.exec(p || ''); return m ? m[1] : ''; }
+
+// 電車が出る日時（23:50 に調べて 0:05 発なら次の日）
+function xDepDate(q, hhmm) {
+  const base = whenToDate(q.when), m = xMin(hhmm); if (m == null) return null;
+  const d = new Date(base); d.setHours(Math.floor(m / 60), m % 60, 0, 0);
+  if (d - base < -6 * 3600000) d.setDate(d.getDate() + 1);
+  return d;
+}
+function xDayLabel(d) {
+  if (!d) return '';
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  const n = Math.round((x - t) / 86400000);
+  return n === 0 ? '' : n === 1 ? '明日' : n === -1 ? '昨日' : `${x.getMonth() + 1}/${x.getDate()}（${'日月火水木金土'[x.getDay()]}）`;
+}
+
+function xItems(route) {
+  const steps = route.steps || [], last = steps.length - 1, items = [];
+  let note = '';
+  const push = (it) => { it.note = note; note = ''; items.push(it); };
+  steps.forEach((st, i) => {
+    if (st.kind === 'station') {
+      if (i === 0) push({ type: 'start', time: st.dep, title: xPlace(st.name), sub: '出発', si: i });
+      else if (i === last) push({ type: 'end', time: st.arr, title: xPlace(st.name), sub: '到着', si: i });
+      else { const w = xDiff(st.arr, st.dep); note = `${xPlace(st.name)}で乗り換え${w > 0 ? ` · ${w}分待ち` : ''}`; }
+      return;
+    }
+    const prev = steps[i - 1] || {}, next = steps[i + 1] || {}, minutes = xDiff(prev.dep, next.arr);
+    if (st.walk) {
+      const n = st.walkMinutes != null ? st.walkMinutes : minutes;
+      push({ type: 'walk', time: prev.dep, minutes: n, title: n != null ? `歩く ${n}分` : '歩く', sub: next.name && i + 1 !== last ? `${xPlace(next.name)}まで` : '', map: walkMapLink(prev, next, i === 1) });
+      return;
+    }
+    const meta = [];
+    if (minutes != null) meta.push(`${minutes}分`);
+    const plat = xPlatform(st.platform); if (plat) meta.push(plat);
+    push({
+      type: 'ride', si: i - 1, step: st, time: prev.dep, end: next.arr, minutes, color: st.color,
+      icon: /バス/.test(st.line) ? 'bus' : /空港|航空|ANA|JAL|便$/.test(st.line) ? 'plane' : 'train',
+      title: st.line, small: st.destination, sub: `${xPlace(prev.name)} → ${xPlace(next.name)}`, meta,
+      stops: st.stops, stopList: [{ name: xPlace(prev.name), time: prev.dep, edge: true }, ...(st.stopList || []).map((x) => ({ name: xPlace(x.name), time: x.time })), { name: xPlace(next.name), time: next.arr, edge: true }],
+      alert: st.alert ? (st.alertText || '運行情報あり') : '',
+    });
+  });
+  const rideColor = (from, step) => { for (let j = from; j >= 0 && j < items.length; j += step) if (items[j].type === 'ride') return items[j].color || X_COLOR.ride; return null; };
+  items.forEach((it, i) => {
+    it.c = it.color || X_COLOR[it.type];
+    if (it.type === 'ride' || it.type === 'end') it.lc = it.c;
+    else { const b = rideColor(i - 1, -1), a = rideColor(i + 1, 1) || X_COLOR.end; it.lc = b ? xMix(b, a) : a; }
+  });
+  return items;
+}
+
+function xItem(it, next, ri, n) {
+  const li = el('li', `x-item ${it.type}`);
+  li.style.setProperty('--c', it.c); li.style.setProperty('--i', n);
+  const h = it.type === 'ride' && it.minutes != null ? Math.max(72, Math.min(180, 40 + it.minutes * 3)) : 48;
+  const t = el('div', 'x-t'); t.style.height = `${h}px`;
+  // 発車時刻を押すと前後のダイヤ（乗換駅なら、その駅から先の電車だけを変える）
+  if (it.time && (it.type === 'ride' || it.type === 'start')) {
+    const b = el('button', 'x-dep', it.time); b.type = 'button';
+    const si = it.type === 'ride' ? it.si : it.si;
+    b.setAttribute('aria-label', `${it.time}発 の前後のダイヤ`);
+    b.addEventListener('click', () => openDia(ri, si));
+    t.append(b);
+  } else t.append(el('span', null, it.time || ''));
+  if (it.end && it.type === 'ride') t.append(el('span', 'end', it.end));
+  const rail = el('div', 'x-rail');
+  const pill = el(it.type === 'ride' ? 'button' : 'div', 'x-pill');
+  if (it.type === 'ride') { pill.type = 'button'; pill.setAttribute('aria-label', `${it.title} の前後のダイヤ`); pill.addEventListener('click', () => openDia(ri, it.si)); }
+  pill.innerHTML = X_ICONS[it.type === 'ride' ? it.icon : it.type === 'start' ? 'pin' : it.type === 'end' ? 'flag' : 'walk'];
+  pill.style.height = `${h}px`;
+  rail.append(pill);
+  if (next) { const tail = el('span', 'x-tail'); tail.style.setProperty('--from', it.lc); tail.style.setProperty('--to', xMix(it.lc, next.lc)); rail.append(tail); }
+  const body = el('div', 'x-body');
+  const title = el('p', 'x-title', it.title); if (it.small) title.append(el('small', null, it.small));
+  body.append(title);
+  if (it.sub) body.append(el('p', 'x-sub', it.sub));
+  if (it.map) body.append(it.map);
+  if (it.type === 'ride') {
+    const ul = el('ul', 'x-meta');
+    it.meta.forEach((m) => ul.append(el('li', null, m)));
+    if (it.alert) ul.append(el('li', 'warn', `⚠︎ ${it.alert}`));
+    if (it.stopList.length > 2 || it.stops) { const c = el('li', 'chip-btn', it.stops || `${it.stopList.length - 1}駅`); c.append(el('span', 'chev', '⌄')); ul.append(c); }
+    const d = el('li', 'chip-btn', '前後のダイヤ'); d.addEventListener('click', (e) => { e.stopPropagation(); openDia(ri, it.si); }); ul.append(d);
+    body.append(ul);
+    const ol = el('ol', 'x-stops');
+    it.stopList.forEach((x) => { const r = el('li', x.edge ? 'edge' : null); r.append(el('span', 'x-stop-time', x.time || ''), el('span', 'x-stop-name', x.name)); ol.append(r); });
+    body.append(ol);
+    // 本文を押すと、途中で止まる駅を開いたり閉じたりする
+    const key = `${ri}:${it.si}`, open = expandedRides.has(key);
+    li.classList.toggle('open', open); body.classList.add('tappable'); body.setAttribute('role', 'button'); body.setAttribute('aria-expanded', String(open)); body.tabIndex = 0;
+    const toggle = (e) => { if (e && e.target.closest('a, button')) return; const now = !li.classList.contains('open'); li.classList.toggle('open', now); body.setAttribute('aria-expanded', String(now)); if (now) expandedRides.add(key); else expandedRides.delete(key); };
+    body.addEventListener('click', toggle); body.addEventListener('keydown', (e) => { if (e.key === 'Enter') toggle(); });
+  }
+  li.append(t, rail, body);
+  return li;
+}
+function xGap(prev, next) {
+  const li = el('li', 'x-gap'); li.append(el('span'));
+  const dots = el('span', 'x-dots'); dots.style.setProperty('--from', xMix(prev.lc, next.lc)); dots.style.setProperty('--to', next.lc); li.append(dots);
+  if (next.note) li.append(el('p', 'x-note', next.note));
+  return li;
+}
+
+let xTick = 0;
+function xCountdown() {
+  const b = $('resultList').querySelector('.x-badge'); if (!b) return;
+  const at = +b.dataset.at; if (!at) { b.textContent = ''; return; }
+  const left = Math.floor((at - Date.now()) / 60000);
+  b.className = 'x-badge';
+  if (left < -1) { b.textContent = ''; }
+  else if (left <= 0) { b.textContent = '今すぐ出発'; b.classList.add('now'); }
+  else { b.textContent = left >= 60 * 24 ? '' : left >= 60 ? `あと${Math.floor(left / 60)}時間${left % 60}分` : `あと${left}分`; if (left <= 3) b.classList.add('now'); }
+}
+
+function renderResultBody(animate) {
+  const list = $('resultList'), q = shownQuery;
+  list.textContent = '';
+  const alt = q && altCard(q, resAlt); if (alt) list.append(alt);
+  if (!shownRoutes.length || !q) return;
+  if (selRoute >= shownRoutes.length) selRoute = 0;
+  const route = shownRoutes[selRoute], s = route.summary;
+  const depAt = xDepDate(q, s.dep), arrAt = depAt && xDepDate({ when: { y: depAt.getFullYear(), mo: depAt.getMonth() + 1, d: depAt.getDate(), h: depAt.getHours(), mi: depAt.getMinutes() } }, s.arr);
+  const wrap = el('section', 'x-result' + (animate ? ' enter' : ''));
+  // 着く時刻（大きく）と、出る時刻・残り時間
+  const sum = el('div', 'x-summary');
+  const eb = el('p', 'x-eyebrow', `${xPlace(q.to)}に着くのは`); const ad = xDayLabel(arrAt); if (ad) eb.append(el('span', 'day', ad));
+  sum.append(eb, el('p', 'x-arrive', s.arr || '--:--'));
+  const leave = el('p', 'x-leave', s.dep ? `${xDayLabel(depAt)}${s.dep} に${xPlace(q.from)}を出発` : '');
+  const badge = el('span', 'x-badge'); badge.dataset.at = depAt ? String(depAt.getTime()) : ''; leave.append(badge);
+  sum.append(leave);
+  const facts = el('ul', 'x-facts'), fact = (v, cls) => { const li = el('li', cls || null); li.append(el('b', null, v)); facts.append(li); };
+  if (s.duration) fact(xDur(s.duration));
+  if (s.fare != null) fact(`${s.fareNote === '目安' ? '約' : ''}¥${s.fare.toLocaleString('ja-JP')}`);
+  if (s.transfers != null) fact(s.transfers ? `乗換${s.transfers}回` : '乗換なし');
+  if (s.tags && s.tags.length) fact(s.tags.join(' · '), 'tags');
+  if (route.changedAt != null) fact('乗り継ぎを変更', 'changed');
+  if (s.alert) fact('⚠︎ 運行情報', 'warn');
+  sum.append(facts);
+  wrap.append(sum);
+  // 経路
+  const tl = el('ol', 'x-tl'), items = xItems(route);
+  items.forEach((it, i) => { if (i > 0) tl.append(xGap(items[i - 1], it)); tl.append(xItem(it, items[i + 1], selRoute, i)); });
+  wrap.append(tl);
+  if (HIBI) {
+    const b = hibiAddButton(route); b.classList.add('x-hibi'); wrap.append(b);
+  }
+  wrap.append(el('p', 'x-hint', '時刻やカプセルを押すと前後のダイヤを見られます。乗換駅の時刻なら、その駅から先の電車だけを変えられます'));
+  // ほかのルート
+  if (shownRoutes.length > 1 || resMore) {
+    const sec = el('section', 'x-others');
+    sec.append(el('p', 'x-label', 'ほかのルート'));
+    const ul = el('ul', 'x-others-list');
+    shownRoutes.forEach((r, i) => {
+      if (i === selRoute) return;
+      const li = el('li', 'x-other'); li.tabIndex = 0; li.setAttribute('role', 'button');
+      const colors = r.steps.filter((x) => x.kind === 'access' && !x.walk).map((x) => x.color || 'var(--accent)');
+      const stripe = el('span', 'x-stripe'); if (colors.length) stripe.style.setProperty('--stripe', (colors.length > 1 ? colors : [colors[0], colors[0]]).join(', '));
+      const time = el('div', 'x-other-time'); time.append(r.summary.dep, el('span', null, '→'), r.summary.arr);
+      const tags = el('span', 'x-other-tags', (r.summary.tags || []).join(''));
+      const meta = el('div', 'x-other-meta', [xDur(r.summary.duration), r.summary.fare != null ? `¥${r.summary.fare.toLocaleString('ja-JP')}` : '', r.summary.transfers ? `乗換${r.summary.transfers}` : '乗換なし'].filter(Boolean).join(' · '));
+      li.append(stripe, time, tags, meta);
+      const pick = () => { selRoute = i; renderResultBody(true); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+      li.addEventListener('click', pick); li.addEventListener('keydown', (e) => { if (e.key === 'Enter') pick(); });
+      ul.append(li);
+    });
+    sec.append(ul);
+    if (resMore) sec.append(moreRoutesButton(resMore.q, resMore.seq, resMore.page, resMore.total));
+    wrap.append(sec);
+  }
+  list.append(wrap);
+  xCountdown(); clearInterval(xTick); xTick = setInterval(xCountdown, 20000);
 }
 
 function renderRoute(route, index, expanded) {
@@ -1283,14 +1474,13 @@ function chooseDia(e) {
   if (d.seq !== searchSeq) { $('diaDlg').close(); return; } // 戻るなどで別の検索結果に変わっていたら使わない
   const combined = TimeShift.combineRoute(d.route, d.stepIndex, e.route);
   shownRoutes[d.routeIndex] = combined;
-  const old = $('resultList').querySelector(`:scope > .route[data-ri="${d.routeIndex}"]`);
-  const card = renderRoute(combined, d.routeIndex, true);
-  if (old) old.replaceWith(card);
+  selRoute = d.routeIndex;
   $('diaDlg').close();
+  renderResultBody(true);
   // 変わった経路が見えるようにして、少し光らせる
-  card.classList.add('just-changed');
-  setTimeout(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
-  setTimeout(() => card.classList.remove('just-changed'), 1800);
+  const card = $('resultList').querySelector('.x-tl');
+  if (card) { card.classList.add('just-changed'); setTimeout(() => card.classList.remove('just-changed'), 1800); }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
   toast(`${d.st.name} ${e.route.summary.dep}発に変更しました`);
 }
 
