@@ -27,7 +27,7 @@ let favorites = store.get('favorites', []);
 let recent = store.get('history', []);
 
 const ENGINES = {
-  app: { label: '検索', hint: 'Yahoo!乗換案内の結果を広告なしで表示します' },
+  app: { label: '経路を探す', hint: 'Yahoo!乗換案内の結果を広告なしで表示します' },
   apple: { label: 'Apple マップで検索', hint: 'Apple マップで開きます（日時は地図アプリ側で変更）' },
   google: { label: 'Google マップで検索', hint: 'Google マップで開きます' },
   yahoo: { label: 'Yahoo サイトで検索', hint: 'Yahoo!乗換案内のサイトで開きます（広告あり）' },
@@ -245,7 +245,9 @@ function showView(name) {
   $('formView').hidden = isResult;
   $('resultView').hidden = !isResult;
   $('backBtn').hidden = !isResult;
-  $('title').textContent = isResult ? '検索結果' : 'のりかえ';
+  $('title').textContent = isResult ? '検索結果' : 'どこへ行く？';
+  document.body.classList.toggle('in-result', isResult);
+  const t = new Date(); $('eyebrow').textContent = isResult ? '' : `${t.getMonth() + 1}月${t.getDate()}日 ${'日月火水木金土'[t.getDay()]}曜日 · のりかえ`;
   window.scrollTo(0, 0);
 }
 
@@ -1804,7 +1806,7 @@ const OPT_IDS = { shin: 'optShin', ex: 'optEx', al: 'optAl', hb: 'optHb', lb: 'o
 const SELECT_IDS = { engine: 'engineSel', sort: 'sortSel', ticket: 'ticketSel', expkind: 'expkindSel', ws: 'wsSel' };
 
 function renderEngineButtons() {
-  $('goBtn').textContent = ENGINES[settings.engine].label;
+  $('goBtn').innerHTML = `<span>${ENGINES[settings.engine].label}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>`;
   $('engineHint').textContent = ENGINES[settings.engine].hint;
   const alt = $('altEngines');
   alt.textContent = '';

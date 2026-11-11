@@ -41,7 +41,7 @@
 <body>
   <header class="topbar">
     <button id="backBtn" class="icon-btn back" aria-label="戻る" hidden>‹</button>
-    <h1 id="title">のりかえ</h1>
+    <div class="ttl"><p class="eyebrow" id="eyebrow"></p><h1 id="title">のりかえ</h1></div>
     <button id="settingsBtn" class="icon-btn" aria-label="設定">⚙︎</button>
   </header>
 
@@ -51,15 +51,15 @@
         <div class="station-row">
           <span class="dot from" aria-hidden="true"></span>
           <input id="from" name="from" type="text" placeholder="出発駅" enterkeyhint="next">
-          <button type="button" id="locBtn" class="chip" aria-label="現在地から">📍現在地</button>
+          <button type="button" id="locBtn" class="chip ic-chip" aria-label="現在地から"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="6.5"/><circle class="solid" cx="12" cy="12" r="2.4"/></svg>現在地</button>
         </div>
         <div id="viaList"></div>
         <div class="station-row">
           <span class="dot to" aria-hidden="true"></span>
           <input id="to" name="to" type="text" placeholder="到着駅" enterkeyhint="search">
-          <button type="button" id="viaBtn" class="chip">＋経由</button>
+          <button type="button" id="viaBtn" class="chip ic-chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>経由</button>
         </div>
-        <button type="button" id="swapBtn" class="swap" aria-label="出発と到着を入れ替え">⇅</button>
+        <button type="button" id="swapBtn" class="swap" aria-label="出発と到着を入れ替え"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v16M4 8l4-4 4 4M16 20V4M12 16l4 4 4-4"/></svg></button>
       </div>
       <div class="nearby" id="nearbyRow" hidden></div>
 
@@ -75,7 +75,7 @@
         <button type="button" id="nowBtn" class="chip">今</button>
       </div>
 
-      <button type="submit" class="primary" id="goBtn">検索</button>
+      <button type="submit" class="primary" id="goBtn"><span>経路を探す</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
       <div class="alt-engines" id="altEngines"></div>
       <p class="hint" id="engineHint"></p>
     </form>
@@ -105,9 +105,9 @@
       <p class="result-when" id="resultWhen"></p>
     </div>
     <div class="result-nav">
-      <button type="button" id="earlierBtn" class="chip">‹ 前の時間</button>
-      <button type="button" id="favFromResultBtn" class="chip">☆ 登録</button>
-      <button type="button" id="laterBtn" class="chip">次の時間 ›</button>
+      <button type="button" id="earlierBtn" class="chip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>前の時間</button>
+      <button type="button" id="favFromResultBtn" class="chip fav" aria-label="お気に入りに登録"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.8l2.5 5.1 5.6.8-4 4 .9 5.6-5-2.6-5 2.6.9-5.6-4-4 5.6-.8z"/></svg></button>
+      <button type="button" id="laterBtn" class="chip">次の時間<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
     </div>
     <div id="resultList" aria-live="polite"></div>
     <div class="result-foot" id="resultFoot">
