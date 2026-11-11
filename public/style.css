@@ -697,3 +697,8 @@ body.in-result .topbar h1 { font-size: 17px; font-weight: 800; color: var(--ink-
 .alt-row::-webkit-scrollbar { display: none; }
 .alt-label { flex: none; font-weight: 800; color: var(--ink-2); }
 .alt-row .chip { white-space: nowrap; background: var(--field); color: var(--ink); border: 0; font-size: 13px; padding: 7px 12px; }
+/* 経由を足しても線が文字に重ならないように：区切り線は行ごとに、点のあとから引く */
+.stations::after { display: none; }
+.stations .station-row { background: linear-gradient(var(--line), var(--line)) 30px 100% / calc(100% - 82px) 1px no-repeat; }
+.stations > .station-row:last-of-type { background: none; }
+#viaList .station-row input { font-size: 16px; font-weight: 700; color: var(--ink-2); }
