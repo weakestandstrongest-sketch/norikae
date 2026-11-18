@@ -1281,9 +1281,30 @@ function reportButton(text) {
   return wrap;
 }
 
+// 前後のダイヤの 1 行（家に帰るアプリ ie の「から家まで」と同じ形）：
+// 左に大きく「出る時刻」とその下に「→ 着く時刻」、右に路線（色の点つき）・所要時間など・全体の時刻。いま表示中の電車は枠で囲んで「いまの便」
+function diaCard({ dep, arr = '', arrCls = '', line = '', sub = '', extra = [], current = false, disabled = false }) {
+  const b = el('button', 'dia-row');
+  b.type = 'button';
+  b.disabled = !!disabled;
+  if (current) b.classList.add('current');
+  const when = el('div', 'dia-when');
+  when.append(el('b', '', dep));
+  const a = el('span', `dia-arr ${arrCls}`.trim());
+  a.append(el('i', '', '→'), arr || '–');
+  when.append(a);
+  const info = el('div', 'dia-info');
+  if (line) { const l = el('p', 'dia-line'); l.append(el('span', 'dia-dot'), line); info.append(l); }
+  if (sub) info.append(el('p', 'dia-sub', sub));
+  for (const [cls, text] of extra) if (text) info.append(el('p', cls, text));
+  b.append(when, info);
+  if (current) b.append(el('span', 'dia-badge', 'いまの便'));
+  return b;
+}
+
 function renderTimetableDia(d, list) {
   const pad2 = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
-  const earlier = el('button', 'dia-more', '▲ さらに前を表示');
+  const earlier = el('button', 'dia-more', 'さらに前');
   earlier.type = 'button';
   earlier.addEventListener('click', () => { d.from -= 60; fillTimetableRows(d); });
   list.append(earlier);
@@ -1292,43 +1313,32 @@ function renderTimetableDia(d, list) {
   let currentRow = null;
   for (const r of rows) {
     const t = r.train;
-    const btn = el('button', 'dia-row');
-    btn.type = 'button';
     const isCurrent = !currentRow && t.time === d.st.dep && d.tt.matchedIndex >= 0 && d.tt.trains[d.tt.matchedIndex].trainId === t.trainId;
-    if (isCurrent) { btn.classList.add('current'); currentRow = btn; }
-    if (r.state === 'tooEarly') btn.disabled = true;
-
-    const times = el('div', 'dia-times');
-    times.append(el('b', '', t.time), el('span', 'dia-arrow', '→'));
-    if (r.state === 'done' && r.arr) {
-      times.append(el('b', r.exact ? '' : 'estimate', pad2(r.arr)));
-      const meta = [`(${TimeShift.formatMinutes((r.arr - r.dep) / MIN_MS)})`];
-      if (r.exact && r.route.summary.transfers != null) meta.push(`乗換${r.route.summary.transfers}回`);
-      times.append(el('small', '', meta.join(' ')));
-    } else if (r.state === 'tooEarly') {
-      times.append(el('small', '', '－'));
-    } else if (r.state === 'done') {
-      times.append(el('small', '', '経路なし'));
-    } else {
-      times.append(el('small', '', '検索中…'));
-    }
-    btn.append(times);
-
-    btn.append(el('div', 'dia-line', `${d.tt.railName}${t.kind && t.kind !== '普通' ? t.kind : ''}・${t.destination}行`));
-    const sub = [t.cars && `${t.cars}両`, t.track && `${t.track}番線発`].filter(Boolean).join('　');
-    if (sub) btn.append(el('div', 'dia-sub', sub));
-
-    if (r.state === 'tooEarly') {
-      btn.append(el('div', 'dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`));
-    } else if (r.state === 'done' && r.arr && !r.exact) {
-      btn.append(el('div', 'dia-note-row', '到着は目安（タップでこの電車を使う経路を探します）'));
-    } else if (r.state === 'done' && r.arr && d.stepIndex > 0) {
-      btn.append(el('div', 'dia-total',
-        diaTotalText(d, r.dep, r.arr)));
-    }
-    if (isCurrent) btn.append(el('div', 'dia-current', '表示中の電車'));
-    if (r.building) btn.append(el('div', 'dia-current', 'この電車を使う経路を探しています…'));
-    if (r.error && !r.building) btn.append(el('div', 'dia-error', `経路を作れませんでした：${r.error.message}`));
+    const done = r.state === 'done' && r.arr;
+    const meta = [];
+    if (done) meta.push(TimeShift.formatMinutes((r.arr - r.dep) / MIN_MS));
+    if (done && r.exact && r.route.summary.transfers != null) meta.push(r.route.summary.transfers ? `乗換${r.route.summary.transfers}回` : '乗換なし');
+    if (r.state === 'done' && !r.arr) meta.push('経路なし');
+    if (r.state === 'pending' || r.state === 'loading') meta.push('検索中…');
+    if (t.cars) meta.push(`${t.cars}両`);
+    if (t.track) meta.push(`${t.track}番線発`);
+    const extra = [];
+    if (r.state === 'tooEarly') extra.push(['dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`]);
+    else if (done && !r.exact) extra.push(['dia-note-row', '到着は目安（タップでこの電車を使う経路を探します）']);
+    else if (done && d.stepIndex > 0) extra.push(['dia-total', diaTotalText(d, r.dep, r.arr)]);
+    if (r.building) extra.push(['dia-current', 'この電車を使う経路を探しています…']);
+    if (r.error && !r.building) extra.push(['dia-error', `経路を作れませんでした：${r.error.message}`]);
+    const btn = diaCard({
+      dep: t.time,
+      arr: done ? pad2(r.arr) : '',
+      arrCls: done ? (r.exact ? '' : 'estimate') : (r.state === 'tooEarly' || r.state === 'done' ? '' : 'pending'),
+      line: `${d.tt.railName}${t.kind && t.kind !== '普通' ? t.kind : ''}・${t.destination}行`,
+      sub: meta.join(' · '),
+      extra,
+      current: isCurrent,
+      disabled: r.state === 'tooEarly',
+    });
+    if (isCurrent) currentRow = btn;
     btn.addEventListener('click', () => {
       if (r.state !== 'done') return;
       buildTrainRoute(d, r);
@@ -1339,7 +1349,7 @@ function renderTimetableDia(d, list) {
 
   if (!rows.length) list.append(el('p', 'empty', 'この時間帯の電車はありません'));
 
-  const later = el('button', 'dia-more', '▼ さらに後を表示');
+  const later = el('button', 'dia-more', 'さらに後');
   later.type = 'button';
   later.addEventListener('click', () => { d.to += 60; fillTimetableRows(d); });
   list.append(later);
@@ -1417,7 +1427,7 @@ function renderDia() {
   }
   const pad2 = (dt) => `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 
-  const earlier = el('button', 'dia-more', d.loading ? '読み込み中…' : '▲ さらに前を表示');
+  const earlier = el('button', 'dia-more', d.loading ? '読み込み中…' : 'さらに前');
   earlier.type = 'button';
   earlier.disabled = d.loading;
   earlier.addEventListener('click', loadDiaEarlier);
@@ -1428,39 +1438,29 @@ function renderDia() {
   for (const e of entries) {
     const r = e.route;
     const tooEarly = d.stArr && e.dep < d.stArr;
-    const row = el('button', 'dia-row');
-    row.type = 'button';
-    row.disabled = !!tooEarly;
     const isCurrent = +e.dep === +d.stDep && !currentRow;
-    if (isCurrent) { row.classList.add('current'); currentRow = row; }
-
-    const times = el('div', 'dia-times');
-    times.append(el('b', '', pad2(e.dep)), el('span', 'dia-arrow', '→'), el('b', '', pad2(e.arr)));
-    const legMeta = [`(${TimeShift.formatMinutes((e.arr - e.dep) / MIN_MS)})`];
-    if (r.summary.transfers != null) legMeta.push(`乗換${r.summary.transfers}回`);
-    times.append(el('small', '', legMeta.join(' ')));
-    row.append(times);
-
     const a = mainAccess(r);
-    if (a) {
-      row.append(el('div', 'dia-line', a.line + (a.destination ? `・${a.destination}` : '')));
-      const plat = (a.platform || '').split('→')[0].trim();
-      if (plat) row.append(el('div', 'dia-sub', plat));
-    }
-    if (tooEarly) {
-      row.append(el('div', 'dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`));
-    } else if (d.stepIndex > 0) {
-      row.append(el('div', 'dia-total',
-        diaTotalText(d, e.dep, e.arr)));
-    }
-    if (isCurrent) row.append(el('div', 'dia-current', '表示中の電車'));
+    const meta = [TimeShift.formatMinutes((e.arr - e.dep) / MIN_MS)];
+    if (r.summary.transfers != null) meta.push(r.summary.transfers ? `乗換${r.summary.transfers}回` : '乗換なし');
+    const plat = a ? (a.platform || '').split('→')[0].trim() : '';
+    if (plat) meta.push(plat);
+    const row = diaCard({
+      dep: pad2(e.dep),
+      arr: pad2(e.arr),
+      line: a ? a.line + (a.destination ? `・${a.destination}` : '') : '',
+      sub: meta.join(' · '),
+      extra: tooEarly ? [['dia-note-row', `乗り継げません（${d.st.name} ${d.st.arr}着）`]] : d.stepIndex > 0 ? [['dia-total', diaTotalText(d, e.dep, e.arr)]] : [],
+      current: isCurrent,
+      disabled: tooEarly,
+    });
+    if (isCurrent) currentRow = row;
     row.addEventListener('click', () => chooseDia(e));
     list.append(row);
   }
 
   if (!entries.length && !d.loading) list.append(el('p', 'empty', '電車が見つかりませんでした'));
 
-  const later = el('button', 'dia-more', d.loading ? '読み込み中…' : '▼ さらに後を表示');
+  const later = el('button', 'dia-more', d.loading ? '読み込み中…' : 'さらに後');
   later.type = 'button';
   later.disabled = d.loading;
   later.addEventListener('click', () => loadDiaLater(3));
